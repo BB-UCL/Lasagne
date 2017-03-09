@@ -148,20 +148,19 @@ def get_output(layer_or_layers, inputs=None, **kwargs):
     both, while the latter will use two different dropout masks.
     """
     from .input import InputLayer
-    from .base import MergeLayer
     # track accepted kwargs used by get_output_for
     accepted_kwargs = {'deterministic'}
     # obtain topological ordering of all layers the output layer(s) depend on
     treat_as_input = inputs.keys() if isinstance(inputs, dict) else []
     all_layers = get_all_layers(layer_or_layers, treat_as_input)
     # initialize layer-to-expression mapping from all input layers
-    all_outputs = dict((layer, layer.input_var)
+    all_outputs = dict((layer, (layer.input_var, ))
                        for layer in all_layers
                        if isinstance(layer, InputLayer) and
                        layer not in treat_as_input)
     # update layer-to-expression mapping from given input(s), if any
     if isinstance(inputs, dict):
-        all_outputs.update((layer, utils.as_theano_expression(expr))
+        all_outputs.update((layer, (utils.as_theano_expression(expr), ))
                            for layer, expr in inputs.items())
     elif inputs is not None:
         if len(all_outputs) > 1:
@@ -170,16 +169,14 @@ def get_output(layer_or_layers, inputs=None, **kwargs):
                              "layers. Please call it with a dictionary of "
                              "input expressions instead.")
         for input_layer in all_outputs:
-            all_outputs[input_layer] = utils.as_theano_expression(inputs)
+            all_outputs[input_layer] = (utils.as_theano_expression(inputs), )
     # update layer-to-expression mapping by propagating the inputs
     for layer in all_layers:
         if layer not in all_outputs:
             try:
-                if isinstance(layer, MergeLayer):
-                    layer_inputs = [all_outputs[input_layer]
-                                    for input_layer in layer.input_layers]
-                else:
-                    layer_inputs = all_outputs[layer.input_layer]
+                layer_inputs = ()
+                for input_layer in layer.input_layers:
+                    layer_inputs += all_outputs[input_layer]
             except KeyError:
                 # one of the input_layer attributes must have been `None`
                 raise ValueError("get_output() was called without giving an "
@@ -187,10 +184,10 @@ def get_output(layer_or_layers, inputs=None, **kwargs):
                                  "layer %r. Please call it with a dictionary "
                                  "mapping this layer to an input expression."
                                  % layer)
-            all_outputs[layer] = layer.get_output_for(layer_inputs, **kwargs)
+            all_outputs[layer] = layer.get_outputs_for(layer_inputs, **kwargs)
             try:
                 accepted_kwargs |= set(utils.inspect_kwargs(
-                        layer.get_output_for))
+                        layer.get_outputs_for))
             except TypeError:
                 # If introspection is not possible, skip it
                 pass
@@ -208,10 +205,14 @@ def get_output(layer_or_layers, inputs=None, **kwargs):
         warn("get_output() was called with unused kwargs:\n\t%s"
              % "\n\t".join(suggestions))
     # return the output(s) of the requested layer(s) only
-    try:
-        return [all_outputs[layer] for layer in layer_or_layers]
-    except TypeError:
-        return all_outputs[layer_or_layers]
+    if isinstance(layer_or_layers, (tuple, list)):
+        return tuple(all_outputs[layer] for layer in layer_or_layers)
+    else:
+        outputs = all_outputs[layer_or_layers]
+        if len(outputs) == 1:
+            return outputs[0]
+        else:
+            outputs
 
 
 def get_output_shape(layer_or_layers, input_shapes=None):
@@ -247,7 +248,6 @@ def get_output_shape(layer_or_layers, input_shapes=None):
             return layer_or_layers.output_shape
 
     from .input import InputLayer
-    from .base import MergeLayer
     # obtain topological ordering of all layers the output layer(s) depend on
     if isinstance(input_shapes, dict):
         treat_as_input = input_shapes.keys()
@@ -274,12 +274,10 @@ def get_output_shape(layer_or_layers, input_shapes=None):
     # update layer-to-shape mapping by propagating the input shapes
     for layer in all_layers:
         if layer not in all_shapes:
-            if isinstance(layer, MergeLayer):
-                input_shapes = [all_shapes[input_layer]
-                                for input_layer in layer.input_layers]
-            else:
-                input_shapes = all_shapes[layer.input_layer]
-            all_shapes[layer] = layer.get_output_shape_for(input_shapes)
+            input_shapes = ()
+            for input_layer in layer.input_layers:
+                input_shapes += all_shapes[input_layer]
+            all_shapes[layer] = layer.get_output_shapes_for(input_shapes)
     # return the output shape(s) of the requested layer(s) only
     try:
         return [all_shapes[layer] for layer in layer_or_layers]

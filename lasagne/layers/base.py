@@ -4,10 +4,8 @@ import theano.tensor as T
 
 from .. import utils
 
-
 __all__ = [
-    "Layer",
-    "MergeLayer",
+    "Layer"
 ]
 
 
@@ -24,44 +22,87 @@ class Layer(object):
 
     Parameters
     ----------
-    incoming : a :class:`Layer` instance or a tuple
-        The layer feeding into this layer, or the expected input shape.
+    incoming :
+        1. a :class:`Layer` instance
+        2. a tuple of :class:`Layer` instances
+        3. a list or tuple of the input shape
+        4. a list/tuple of lists/tuples with multiple input shapes
     name : a string or None
         An optional name to attach to this layer.
     """
-    def __init__(self, incoming, name=None):
-        if isinstance(incoming, tuple):
-            self.input_shape = incoming
-            self.input_layer = None
+    def __init__(self, incoming, max_inputs=1, num_outputs=1,
+                 inner_layers=(), name=None):
+        if isinstance(incoming, (list, tuple)):
+            if all(isinstance(i, int) or i is None for i in incoming):
+                # Single shape
+                incoming = (incoming,)
         else:
-            self.input_shape = incoming.output_shape
-            self.input_layer = incoming
+            # Single layer
+            incoming = (incoming,)
 
+        self.input_shapes = ()
+        layers = []
+        for l in incoming:
+            if isinstance(l, (tuple, list)):
+                if not all(isinstance(i, int) or i is None for i in l):
+                    raise ValueError("The shape {} is not valid".format(l))
+                # Shape
+                self.input_shapes += (l,)
+                layers.append(None)
+            else:
+                # Layer
+                self.input_shapes += l.output_shapes
+                layers.append(l)
+
+        self.input_layers = tuple(layers)
+        if len(self.input_shapes) > max_inputs:
+            raise ValueError("Can not create layer with more inputs than %d" %
+                             max_inputs)
+
+        self.max_inputs = max_inputs
+        self.num_outputs = num_outputs
+        self.inner_layers = inner_layers
         self.name = name
         self.params = OrderedDict()
         self.get_output_kwargs = []
+        for shape in self.input_shapes:
+            if any(d is not None and d <= 0 for d in shape):
+                raise ValueError(("Cannot create Layer with a non-positive "
+                                  "input_shape dimension. input_shape=%r, "
+                                  "self.name=%r") % (shape, self.name))
 
-        if any(d is not None and d <= 0 for d in self.input_shape):
-            raise ValueError((
-                "Cannot create Layer with a non-positive input_shape "
-                "dimension. input_shape=%r, self.name=%r") % (
-                    self.input_shape, self.name))
+    @property
+    def input_shape(self):
+        if len(self.input_shapes) > 1:
+            raise ValueError("The layer has more than 1 input, "
+                             "use `self.input_shapes`.")
+        return self.input_shapes[0]
+
+    @property
+    def output_shapes(self):
+        shapes = self.get_output_shapes_for(self.input_shapes)
+        for shape in shapes:
+            if any(isinstance(s, T.Variable) for s in shape):
+                raise ValueError("%s returned a symbolic output shape from its"
+                                 " get_output_shape_for() method: %r. This is "
+                                 "not allowed; shapes must be tuples of "
+                                 "integers for fixed-size dimensions and Nones"
+                                 " for variable dimensions." %
+                                 (self.__class__.__name__, shape))
+        return shapes
 
     @property
     def output_shape(self):
-        shape = self.get_output_shape_for(self.input_shape)
-        if any(isinstance(s, T.Variable) for s in shape):
-            raise ValueError("%s returned a symbolic output shape from its "
-                             "get_output_shape_for() method: %r. This is not "
-                             "allowed; shapes must be tuples of integers for "
-                             "fixed-size dimensions and Nones for variable "
-                             "dimensions." % (self.__class__.__name__, shape))
-        return shape
+        if self.num_outputs > 1:
+            raise ValueError("The layer has more than 1 output, "
+                             "use `self.output_shapes`.")
+        return self.output_shapes[0]
 
     def get_params(self, unwrap_shared=True, **tags):
         """
         Returns a list of Theano shared variables or expressions that
         parameterize the layer.
+        !!! Together with the parameters of any innner layers !!!
 
         By default, all shared variables that participate in the forward pass
         will be returned (in the order they were registered in the Layer's
@@ -116,25 +157,27 @@ class Layer(object):
                       if not (self.params[param] & exclude)]
 
         if unwrap_shared:
-            return utils.collect_shared_vars(result)
-        else:
-            return result
+            result = utils.collect_shared_vars(result)
+        # Add all of the inner layers parameters
+        for l in self.inner_layers:
+            result += l.get_params(unwrap_shared=unwrap_shared, **tags)
+        return result
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
         """
         Computes the output shape of this layer, given an input shape.
 
         Parameters
         ----------
-        input_shape : tuple
-            A tuple representing the shape of the input. The tuple should have
+        input_shapes : tuple of tuples
+            Each tuple represents the shape of the input. The tuple should have
             as many elements as there are input dimensions, and the elements
             should be integers or `None`.
 
         Returns
         -------
-        tuple
-            A tuple representing the shape of the output of this layer. The
+        tuple of tuples
+            Each tuple represents the shape of the output of this layer. The
             tuple has as many elements as there are output dimensions, and the
             elements are all either integers or `None`.
 
@@ -146,15 +189,21 @@ class Layer(object):
         (e.g. because it applies an elementwise operation) does not need
         to override this method.
         """
-        return input_shape
+        return input_shapes
 
-    def get_output_for(self, input, **kwargs):
+    def get_output_shape_for(self, input_shapes):
+        if self.num_outputs > 1:
+            raise ValueError("The layer has more than 1 output, "
+                             "use `self.output_shapes`.")
+        return self.get_output_shapes_for(input_shapes)
+
+    def get_outputs_for(self, inputs, **kwargs):
         """
         Propagates the given input through this layer (and only this layer).
 
         Parameters
         ----------
-        input : Theano expression
+        inputs : tuple of Theano expression
             The expression to propagate through this layer.
 
         Returns
@@ -172,6 +221,12 @@ class Layer(object):
         :class:`Layer` class. By default it raises `NotImplementedError`.
         """
         raise NotImplementedError
+
+    def get_output_for(self, input_shapes):
+        if self.num_outputs > 1:
+            raise ValueError("The layer has more than 1 output, "
+                             "use `self.output_shapes`.")
+        return self.get_outputs_for(input_shapes)
 
     def add_param(self, spec, shape, name=None, **tags):
         """
@@ -238,91 +293,3 @@ class Layer(object):
         self.params[param] = set(tag for tag, value in tags.items() if value)
 
         return param
-
-
-class MergeLayer(Layer):
-    """
-    This class represents a layer that aggregates input from multiple layers.
-    It should be subclassed when implementing new types of layers that obtain
-    their input from multiple layers.
-
-    Parameters
-    ----------
-    incomings : a list of :class:`Layer` instances or tuples
-        The layers feeding into this layer, or expected input shapes.
-    name : a string or None
-        An optional name to attach to this layer.
-    """
-    def __init__(self, incomings, name=None):
-        self.input_shapes = [incoming if isinstance(incoming, tuple)
-                             else incoming.output_shape
-                             for incoming in incomings]
-        self.input_layers = [None if isinstance(incoming, tuple)
-                             else incoming
-                             for incoming in incomings]
-        self.name = name
-        self.params = OrderedDict()
-        self.get_output_kwargs = []
-
-    @Layer.output_shape.getter
-    def output_shape(self):
-        shape = self.get_output_shape_for(self.input_shapes)
-        if any(isinstance(s, T.Variable) for s in shape):
-            raise ValueError("%s returned a symbolic output shape from its "
-                             "get_output_shape_for() method: %r. This is not "
-                             "allowed; shapes must be tuples of integers for "
-                             "fixed-size dimensions and Nones for variable "
-                             "dimensions." % (self.__class__.__name__, shape))
-        return shape
-
-    def get_output_shape_for(self, input_shapes):
-        """
-        Computes the output shape of this layer, given a list of input shapes.
-
-        Parameters
-        ----------
-        input_shape : list of tuple
-            A list of tuples, with each tuple representing the shape of one of
-            the inputs (in the correct order). These tuples should have as many
-            elements as there are input dimensions, and the elements should be
-            integers or `None`.
-
-        Returns
-        -------
-        tuple
-            A tuple representing the shape of the output of this layer. The
-            tuple has as many elements as there are output dimensions, and the
-            elements are all either integers or `None`.
-
-        Notes
-        -----
-        This method must be overridden when implementing a new
-        :class:`Layer` class with multiple inputs. By default it raises
-        `NotImplementedError`.
-        """
-        raise NotImplementedError
-
-    def get_output_for(self, inputs, **kwargs):
-        """
-        Propagates the given inputs through this layer (and only this layer).
-
-        Parameters
-        ----------
-        inputs : list of Theano expressions
-            The Theano expressions to propagate through this layer.
-
-        Returns
-        -------
-        Theano expressions
-            The output of this layer given the inputs to this layer.
-
-        Notes
-        -----
-        This is called by the base :meth:`lasagne.layers.get_output()`
-        to propagate data through a network.
-
-        This method should be overridden when implementing a new
-        :class:`Layer` class with multiple inputs. By default it raises
-        `NotImplementedError`.
-        """
-        raise NotImplementedError

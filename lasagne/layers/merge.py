@@ -1,6 +1,6 @@
 import theano.tensor as T
 
-from .base import MergeLayer
+from .base import Layer
 
 
 __all__ = [
@@ -100,12 +100,12 @@ def autocrop(inputs, cropping):
         # Get the number of dimensions
         ndim = inputs[0].ndim
         # Check for consistent number of dimensions
-        if not all(input.ndim == ndim for input in inputs):
+        if not all(x.ndim == ndim for x in inputs):
             raise ValueError("Not all inputs are of the same "
                              "dimensionality. Got {0} inputs of "
-                             "dimensionalities {1}.".format(
-                                len(inputs),
-                                [input.ndim for input in inputs]))
+                             "dimensionalities {1}."
+                             .format(len(inputs),
+                                     [x.ndim for x in inputs]))
         # Get the shape of each input, where each shape will be a Theano
         # expression
         shapes = [input.shape for input in inputs]
@@ -123,7 +123,7 @@ def autocrop(inputs, cropping):
         cropping = list(cropping)
         if ndim > len(cropping):
             cropping = list(cropping) + \
-                         [None] * (ndim - len(cropping))
+                       [None] * (ndim - len(cropping))
 
         # For each dimension
         for dim, cr in enumerate(cropping):
@@ -216,9 +216,9 @@ def autocrop_array_shapes(input_shapes, cropping):
         if not all(len(sh) == ndim for sh in input_shapes):
             raise ValueError("Not all inputs are of the same "
                              "dimensionality. Got {0} inputs of "
-                             "dimensionalities {1}.".format(
-                                len(input_shapes),
-                                [len(sh) for sh in input_shapes]))
+                             "dimensionalities {1}."
+                             .format(len(input_shapes),
+                                     [len(sh) for sh in input_shapes]))
 
         result = []
 
@@ -227,7 +227,7 @@ def autocrop_array_shapes(input_shapes, cropping):
         cropping = list(cropping)
         if ndim > len(cropping):
             cropping = list(cropping) + \
-                         [None] * (ndim - len(cropping))
+                       [None] * (ndim - len(cropping))
 
         for sh, cr in zip(zip(*input_shapes), cropping):
             if cr is None:
@@ -240,7 +240,7 @@ def autocrop_array_shapes(input_shapes, cropping):
         return [tuple(sh) for sh in zip(*result)]
 
 
-class ConcatLayer(MergeLayer):
+class ConcatLayer(Layer):
     """
     Concatenates multiple inputs along the specified axis. Inputs should have
     the same shape except for the dimension specified in axis, which can have
@@ -258,8 +258,8 @@ class ConcatLayer(MergeLayer):
         Cropping for each input axis. Cropping is described in the docstring
         for :func:`autocrop`. Cropping is always disabled for `axis`.
     """
-    def __init__(self, incomings, axis=1, cropping=None, **kwargs):
-        super(ConcatLayer, self).__init__(incomings, **kwargs)
+    def __init__(self, incoming, axis=1, cropping=None, **kwargs):
+        super(ConcatLayer, self).__init__(incoming, **kwargs)
         self.axis = axis
         if cropping is not None:
             # If cropping is enabled, don't crop on the selected axis
@@ -267,7 +267,7 @@ class ConcatLayer(MergeLayer):
             cropping[axis] = None
         self.cropping = cropping
 
-    def get_output_shape_for(self, input_shapes):
+    def get_output_shapes_for(self, input_shapes):
         input_shapes = autocrop_array_shapes(input_shapes, self.cropping)
         # Infer the output shape by grabbing, for each axis, the first
         # input size that is not `None` (if there is any)
@@ -288,16 +288,16 @@ class ConcatLayer(MergeLayer):
         sizes = [input_shape[self.axis] for input_shape in input_shapes]
         concat_size = None if any(s is None for s in sizes) else sum(sizes)
         output_shape[self.axis] = concat_size
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, inputs, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
         inputs = autocrop(inputs, self.cropping)
-        return T.concatenate(inputs, axis=self.axis)
+        return T.concatenate(inputs, axis=self.axis),
 
 concat = ConcatLayer  # shortcut
 
 
-class ElemwiseMergeLayer(MergeLayer):
+class ElemwiseMergeLayer(Layer):
     """
     This layer performs an elementwise merge of its input layers.
     It requires all input layers to have the same output shape.
@@ -322,12 +322,12 @@ class ElemwiseMergeLayer(MergeLayer):
     ElemwiseSumLayer : Shortcut for sum layer.
     """
 
-    def __init__(self, incomings, merge_function, cropping=None, **kwargs):
-        super(ElemwiseMergeLayer, self).__init__(incomings, **kwargs)
+    def __init__(self, incoming, merge_function, cropping=None, **kwargs):
+        super(ElemwiseMergeLayer, self).__init__(incoming, **kwargs)
         self.merge_function = merge_function
         self.cropping = cropping
 
-    def get_output_shape_for(self, input_shapes):
+    def get_output_shapes_for(self, input_shapes):
         input_shapes = autocrop_array_shapes(input_shapes, self.cropping)
         # Infer the output shape by grabbing, for each axis, the first
         # input size that is not `None` (if there is any)
@@ -337,22 +337,22 @@ class ElemwiseMergeLayer(MergeLayer):
         def match(shape1, shape2):
             return (len(shape1) == len(shape2) and
                     all(s1 is None or s2 is None or s1 == s2
-                        for s1, s2 in zip(shape1, shape2)))
+                        for s1, s2 in zip(shape1, shape2))),
 
-        # Check for compatibility with inferred output shape
+            # Check for compatibility with inferred output shape
         if not all(match(shape, output_shape) for shape in input_shapes):
             raise ValueError("Mismatch: not all input shapes are the same")
         return output_shape
 
-    def get_output_for(self, inputs, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
         inputs = autocrop(inputs, self.cropping)
         output = None
-        for input in inputs:
+        for x in inputs:
             if output is not None:
-                output = self.merge_function(output, input)
+                output = self.merge_function(output, x)
             else:
-                output = input
-        return output
+                output = x
+        return output,
 
 
 class ElemwiseSumLayer(ElemwiseMergeLayer):
@@ -395,10 +395,10 @@ class ElemwiseSumLayer(ElemwiseMergeLayer):
 
         self.coeffs = coeffs
 
-    def get_output_for(self, inputs, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
         # if needed multiply each input by its coefficient
-        inputs = [input * coeff if coeff != 1 else input
-                  for coeff, input in zip(self.coeffs, inputs)]
+        inputs = [x * coeff if coeff != 1 else input
+                  for coeff, x in zip(self.coeffs, inputs)]
 
         # pass scaled inputs to the super class for summing
-        return super(ElemwiseSumLayer, self).get_output_for(inputs, **kwargs)
+        return super(ElemwiseSumLayer, self).get_outputs_for(inputs, **kwargs)

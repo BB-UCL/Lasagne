@@ -8,15 +8,15 @@ class TestLayer:
     @pytest.fixture
     def layer(self):
         from lasagne.layers.base import Layer
-        return Layer(Mock(output_shape=(None,)))
+        return Layer(Mock(output_shapes=((None,), )))
 
     @pytest.fixture
     def named_layer(self):
         from lasagne.layers.base import Layer
-        return Layer(Mock(output_shape=(None,)), name='layer_name')
+        return Layer(Mock(output_shapes=((None,), )), name='layer_name')
 
     def test_input_shape(self, layer):
-        assert layer.input_shape == layer.input_layer.output_shape
+        assert layer.input_shapes == layer.input_layers[0].output_shapes
 
     def test_get_output_shape_for(self, layer):
         shape = Mock()
@@ -29,8 +29,8 @@ class TestLayer:
 
     def test_layer_from_shape(self, layer_from_shape):
         layer = layer_from_shape
-        assert layer.input_layer is None
-        assert layer.input_shape == (None, 20)
+        assert layer.input_layers == (None, )
+        assert layer.input_shapes == ((None, 20), )
 
     def test_named_layer(self, named_layer):
         assert named_layer.name == 'layer_name'
@@ -112,9 +112,9 @@ class TestLayer:
 
     def test_nonpositive_input_dims_raises_value_error(self, layer):
         from lasagne.layers.base import Layer
-        neg_input_layer = Mock(output_shape=(None, -1, -1))
-        zero_input_layer = Mock(output_shape=(None, 0, 0))
-        pos_input_layer = Mock(output_shape=(None, 1, 1))
+        neg_input_layer = Mock(output_shapes=((None, -1, -1), ))
+        zero_input_layer = Mock(output_shapes=((None, 0, 0), ))
+        pos_input_layer = Mock(output_shapes=((None, 1, 1), ))
         with pytest.raises(ValueError):
             Layer(neg_input_layer)
         with pytest.raises(ValueError):
@@ -125,56 +125,60 @@ class TestLayer:
         from lasagne.layers.base import Layer
 
         class WrongLayer(Layer):
-            def get_output_shape_for(self, input_shape):
-                return theano.tensor.vector().shape
+            def get_output_shapes_for(self, input_shapes):
+                return theano.tensor.vector().shape,
         with pytest.raises(ValueError) as exc:
             WrongLayer((None,)).output_shape
         assert "symbolic output shape" in exc.value.args[0]
 
 
-class TestMergeLayer:
+class TestMultipleLayer:
     @pytest.fixture
     def layer(self):
-        from lasagne.layers.base import MergeLayer
-        return MergeLayer([Mock(), Mock()])
+        from lasagne.layers.base import Layer
+        l1 = Layer(Mock(output_shapes=((None, 212), )))
+        l2 = Layer(Mock(output_shapes=((314, None), )))
+        return Layer((l1, l2), max_inputs=2)
 
     def test_input_shapes(self, layer):
-        assert layer.input_shapes == [l.output_shape
-                                      for l in layer.input_layers]
+        assert layer.input_shapes == tuple(l.output_shape
+                                           for l in layer.input_layers)
 
     @pytest.fixture
     def layer_from_shape(self):
         from lasagne.layers.input import InputLayer
-        from lasagne.layers.base import MergeLayer
-        return MergeLayer(
+        from lasagne.layers.base import Layer
+        return Layer(
             [(None, 20),
-             Mock(InputLayer((None,)), output_shape=(None,))]
-        )
+             Mock(InputLayer((None,)), output_shapes=((None,), ))],
+            max_inputs=2)
 
     def test_layer_from_shape(self, layer_from_shape):
         layer = layer_from_shape
         assert layer.input_layers[0] is None
         assert layer.input_shapes[0] == (None, 20)
         assert layer.input_layers[1] is not None
-        assert (layer.input_shapes[1] == layer.input_layers[1].output_shape)
+        assert (layer.input_shapes[1] ==
+                layer.input_layers[1].output_shapes[0])
 
     def test_get_params(self, layer):
         assert layer.get_params() == []
 
-    def test_get_output_shape_for_notimplemented(self, layer):
-        with pytest.raises(NotImplementedError):
-            layer.get_output_shape_for(Mock())
+    # def test_get_output_shape_for_notimplemented(self, layer):
+    #     with pytest.raises(NotImplementedError):
+    #         layer.get_output_shape_for(Mock())
 
     def test_get_output_for_notimplemented(self, layer):
         with pytest.raises(NotImplementedError):
             layer.get_output_for(Mock())
 
     def test_symbolic_output_shape(self):
-        from lasagne.layers.base import MergeLayer
+        from lasagne.layers.base import Layer
 
-        class WrongLayer(MergeLayer):
-            def get_output_shape_for(self, input_shapes):
-                return theano.tensor.vector().shape
+        class WrongLayer(Layer):
+            def get_output_shapes_for(self, input_shapes):
+                return theano.tensor.vector().shape,
+
         with pytest.raises(ValueError) as exc:
-            WrongLayer([(None,)]).output_shape
+            print(WrongLayer((None,)).output_shape)
         assert "symbolic output shape" in exc.value.args[0]

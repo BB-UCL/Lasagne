@@ -62,8 +62,9 @@ class EmbeddingLayer(Layer):
 
         self.W = self.add_param(W, (input_size, output_size), name="W")
 
-    def get_output_shape_for(self, input_shape):
-        return input_shape + (self.output_size, )
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
+        return input_shape + (self.output_size, ),
 
-    def get_output_for(self, input, **kwargs):
-        return self.W[input]
+    def get_outputs_for(self, inputs, **kwargs):
+        return self.W[inputs[0]],

@@ -314,20 +314,22 @@ class BaseConvLayer(Layer):
         tuple of int
             The shape of the weight matrix.
         """
-        num_input_channels = self.input_shape[1]
+        num_input_channels = self.input_shapes[0][1]
         return (self.num_filters, num_input_channels) + self.filter_size
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         pad = self.pad if isinstance(self.pad, tuple) else (self.pad,) * self.n
         batchsize = input_shape[0]
         return ((batchsize, self.num_filters) +
                 tuple(conv_output_length(input, filter, stride, p)
                       for input, filter, stride, p
                       in zip(input_shape[2:], self.filter_size,
-                             self.stride, pad)))
+                             self.stride, pad))),
 
-    def get_output_for(self, input, **kwargs):
-        conved = self.convolve(input, **kwargs)
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
+        conved = self.convolve(x, **kwargs)
 
         if self.b is None:
             activation = conved
@@ -336,7 +338,7 @@ class BaseConvLayer(Layer):
         else:
             activation = conved + self.b.dimshuffle(('x', 0) + ('x',) * self.n)
 
-        return self.nonlinearity(activation)
+        return self.nonlinearity(activation),
 
     def convolve(self, input, **kwargs):
         """
@@ -475,9 +477,9 @@ class Conv1DLayer(BaseConvLayer):
                                           **kwargs)
         self.convolution = convolution
 
-    def convolve(self, input, **kwargs):
+    def convolve(self, x, **kwargs):
         border_mode = 'half' if self.pad == 'same' else self.pad
-        conved = self.convolution(input, self.W,
+        conved = self.convolution(x, self.W,
                                   self.input_shape, self.get_W_shape(),
                                   subsample=self.stride,
                                   border_mode=border_mode,
@@ -599,9 +601,9 @@ class Conv2DLayer(BaseConvLayer):
                                           **kwargs)
         self.convolution = convolution
 
-    def convolve(self, input, **kwargs):
+    def convolve(self, x, **kwargs):
         border_mode = 'half' if self.pad == 'same' else self.pad
-        conved = self.convolution(input, self.W,
+        conved = self.convolution(x, self.W,
                                   self.input_shape, self.get_W_shape(),
                                   subsample=self.stride,
                                   border_mode=border_mode,
@@ -756,8 +758,8 @@ class TransposedConv2DLayer(BaseConvLayer):
             output_size = as_tuple(output_size, 2, int)
         self.output_size = output_size
         super(TransposedConv2DLayer, self).__init__(
-                incoming, num_filters, filter_size, stride, crop, untie_biases,
-                W, b, nonlinearity, flip_filters, n=2, **kwargs)
+            incoming, num_filters, filter_size, stride, crop, untie_biases,
+            W, b, nonlinearity, flip_filters, n=2, **kwargs)
         # rename self.pad to self.crop:
         self.crop = self.pad
         del self.pad
@@ -767,7 +769,8 @@ class TransposedConv2DLayer(BaseConvLayer):
         # first two sizes are swapped compared to a forward convolution
         return (num_input_channels, self.num_filters) + self.filter_size
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         if self.output_size is not None:
             size = self.output_size
             if isinstance(self.output_size, T.Variable):
@@ -780,12 +783,12 @@ class TransposedConv2DLayer(BaseConvLayer):
         crop = crop if isinstance(crop, tuple) else (crop,) * self.n
         batchsize = input_shape[0]
         return ((batchsize, self.num_filters) +
-                tuple(conv_input_length(input, filter, stride, p)
-                      for input, filter, stride, p
+                tuple(conv_input_length(x, kernel, stride, p)
+                      for x, kernel, stride, p
                       in zip(input_shape[2:], self.filter_size,
-                             self.stride, crop)))
+                             self.stride, crop))),
 
-    def convolve(self, input, **kwargs):
+    def convolve(self, x, **kwargs):
         border_mode = 'half' if self.crop == 'same' else self.crop
         op = T.nnet.abstract_conv.AbstractConv2d_gradInputs(
             imshp=self.output_shape,
@@ -796,8 +799,8 @@ class TransposedConv2DLayer(BaseConvLayer):
         if isinstance(self.output_size, T.Variable):
             output_size = self.output_size
         elif any(s is None for s in output_size):
-            output_size = self.get_output_shape_for(input.shape)[2:]
-        conved = op(self.W, input, output_size)
+            output_size = self.get_output_shape_for(x.shape)[2:]
+        conved = op(self.W, x, output_size)
         return conved
 
 Deconv2DLayer = TransposedConv2DLayer
@@ -906,35 +909,36 @@ class DilatedConv2DLayer(BaseConvLayer):
                  **kwargs):
         self.dilation = as_tuple(dilation, 2, int)
         super(DilatedConv2DLayer, self).__init__(
-                incoming, num_filters, filter_size, 1, pad,
-                untie_biases, W, b, nonlinearity, flip_filters, n=2, **kwargs)
+            incoming, num_filters, filter_size, 1, pad,
+            untie_biases, W, b, nonlinearity, flip_filters, n=2, **kwargs)
         # remove self.stride:
         del self.stride
         # require valid convolution
         if self.pad != (0, 0):
             raise NotImplementedError(
-                    "DilatedConv2DLayer requires pad=0 / (0,0) / 'valid', but "
-                    "got %r. For a padded dilated convolution, add a PadLayer."
-                    % (pad,))
+                "DilatedConv2DLayer requires pad=0 / (0,0) / 'valid', but "
+                "got %r. For a padded dilated convolution, add a PadLayer."
+                % (pad,))
         # require unflipped filters
         if self.flip_filters:
             raise NotImplementedError(
-                    "DilatedConv2DLayer requires flip_filters=False.")
+                "DilatedConv2DLayer requires flip_filters=False.")
 
     def get_W_shape(self):
         num_input_channels = self.input_shape[1]
         # first two sizes are swapped compared to a forward convolution
         return (num_input_channels, self.num_filters) + self.filter_size
 
-    def get_output_shape_for(self, input_shape):
-        batchsize = input_shape[0]
-        return ((batchsize, self.num_filters) +
-                tuple(conv_output_length(input, (filter-1) * dilate + 1, 1, 0)
-                      for input, filter, dilate
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
+        batch_size = input_shape[0]
+        return ((batch_size, self.num_filters) +
+                tuple(conv_output_length(x, (kernel-1) * dilate + 1, 1, 0)
+                      for x, kernel, dilate
                       in zip(input_shape[2:], self.filter_size,
-                             self.dilation)))
+                             self.dilation))),
 
-    def convolve(self, input, **kwargs):
+    def convolve(self, x, **kwargs):
         # we perform a convolution backward pass wrt weights,
         # passing kernels as output gradient
         imshp = self.input_shape
@@ -948,6 +952,6 @@ class DilatedConv2DLayer(BaseConvLayer):
             filter_flip=False)
         output_size = self.output_shape[2:]
         if any(s is None for s in output_size):
-            output_size = self.get_output_shape_for(input.shape)[2:]
-        conved = op(input.transpose(1, 0, 2, 3), self.W, output_size)
+            output_size = self.get_output_shape_for(x.shape)[2:]
+        conved = op(x.transpose(1, 0, 2, 3), self.W, output_size)
         return conved.transpose(1, 0, 2, 3)

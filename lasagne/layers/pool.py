@@ -153,7 +153,8 @@ class Pool1DLayer(Layer):
         self.ignore_border = ignore_border
         self.mode = mode
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         output_shape = list(input_shape)  # copy / convert to mutable list
 
         output_shape[-1] = pool_output_length(input_shape[-1],
@@ -163,10 +164,10 @@ class Pool1DLayer(Layer):
                                               ignore_border=self.ignore_border,
                                               )
 
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
-        input_4d = T.shape_padright(input, 1)
+    def get_outputs_for(self, inputs, **kwargs):
+        input_4d = T.shape_padright(inputs[0], 1)
 
         pooled = pool_2d(input_4d,
                          ws=(self.pool_size[0], 1),
@@ -175,7 +176,7 @@ class Pool1DLayer(Layer):
                          pad=(self.pad[0], 0),
                          mode=self.mode,
                          )
-        return pooled[:, :, :, 0]
+        return pooled[:, :, :, 0],
 
 
 class Pool2DLayer(Layer):
@@ -252,7 +253,8 @@ class Pool2DLayer(Layer):
         self.ignore_border = ignore_border
         self.mode = mode
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         output_shape = list(input_shape)  # copy / convert to mutable list
 
         output_shape[2] = pool_output_length(input_shape[2],
@@ -269,17 +271,17 @@ class Pool2DLayer(Layer):
                                              ignore_border=self.ignore_border,
                                              )
 
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
-        pooled = pool_2d(input,
+    def get_outputs_for(self, inputs, **kwargs):
+        pooled = pool_2d(inputs[0],
                          ws=self.pool_size,
                          stride=self.stride,
                          ignore_border=self.ignore_border,
                          pad=self.pad,
                          mode=self.mode,
                          )
-        return pooled
+        return pooled,
 
 
 class MaxPool1DLayer(Pool1DLayer):
@@ -428,13 +430,15 @@ class Upscale1DLayer(Layer):
             raise ValueError(msg.format(mode))
         self.mode = mode
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         output_shape = list(input_shape)  # copy / convert to mutable list
         if output_shape[2] is not None:
             output_shape[2] *= self.scale_factor[0]
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         a, = self.scale_factor
         upscaled = input
         if self.mode == 'repeat':
@@ -442,10 +446,10 @@ class Upscale1DLayer(Layer):
                 upscaled = T.extra_ops.repeat(upscaled, a, 2)
         elif self.mode == 'dilate':
             if a > 1:
-                output_shape = self.get_output_shape_for(input.shape)
-                upscaled = T.zeros(shape=output_shape, dtype=input.dtype)
-                upscaled = T.set_subtensor(upscaled[:, :, ::a], input)
-        return upscaled
+                output_shape = self.get_output_shape_for(x.shape)
+                upscaled = T.zeros(shape=output_shape, dtype=x.dtype)
+                upscaled = T.set_subtensor(upscaled[:, :, ::a], x)
+        return upscaled,
 
 
 class Upscale2DLayer(Layer):
@@ -493,17 +497,19 @@ class Upscale2DLayer(Layer):
             raise ValueError(msg.format(mode))
         self.mode = mode
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         output_shape = list(input_shape)  # copy / convert to mutable list
         if output_shape[2] is not None:
             output_shape[2] *= self.scale_factor[0]
         if output_shape[3] is not None:
             output_shape[3] *= self.scale_factor[1]
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         a, b = self.scale_factor
-        upscaled = input
+        upscaled = x
         if self.mode == 'repeat':
             if b > 1:
                 upscaled = T.extra_ops.repeat(upscaled, b, 3)
@@ -511,10 +517,10 @@ class Upscale2DLayer(Layer):
                 upscaled = T.extra_ops.repeat(upscaled, a, 2)
         elif self.mode == 'dilate':
             if b > 1 or a > 1:
-                output_shape = self.get_output_shape_for(input.shape)
-                upscaled = T.zeros(shape=output_shape, dtype=input.dtype)
-                upscaled = T.set_subtensor(upscaled[:, :, ::a, ::b], input)
-        return upscaled
+                output_shape = self.get_output_shape_for(x.shape)
+                upscaled = T.zeros(shape=output_shape, dtype=x.dtype)
+                upscaled = T.set_subtensor(upscaled[:, :, ::a, ::b], x)
+        return upscaled,
 
 
 class Upscale3DLayer(Layer):
@@ -557,7 +563,8 @@ class Upscale3DLayer(Layer):
             raise ValueError(msg.format(mode))
         self.mode = mode
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         output_shape = list(input_shape)  # copy / convert to mutable list
         if output_shape[2] is not None:
             output_shape[2] *= self.scale_factor[0]
@@ -565,11 +572,12 @@ class Upscale3DLayer(Layer):
             output_shape[3] *= self.scale_factor[1]
         if output_shape[4] is not None:
             output_shape[4] *= self.scale_factor[2]
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         a, b, c = self.scale_factor
-        upscaled = input
+        upscaled = x
         if self.mode == 'repeat':
             if c > 1:
                 upscaled = T.extra_ops.repeat(upscaled, c, 4)
@@ -579,11 +587,11 @@ class Upscale3DLayer(Layer):
                 upscaled = T.extra_ops.repeat(upscaled, a, 2)
         elif self.mode == 'dilate':
             if c > 1 or b > 1 or a > 1:
-                output_shape = self.get_output_shape_for(input.shape)
-                upscaled = T.zeros(shape=output_shape, dtype=input.dtype)
+                output_shape = self.get_output_shape_for(x.shape)
+                upscaled = T.zeros(shape=output_shape, dtype=x.dtype)
                 upscaled = T.set_subtensor(
-                    upscaled[:, :, ::a, ::b, ::c], input)
-        return upscaled
+                    upscaled[:, :, ::a, ::b, ::c], x)
+        return upscaled,
 
 
 class FeaturePoolLayer(Layer):
@@ -639,13 +647,15 @@ class FeaturePoolLayer(Layer):
                              "multiple of the pool size (pool_size=%d)" %
                              (num_feature_maps, self.pool_size))
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         output_shape = list(input_shape)  # make a mutable copy
         output_shape[self.axis] = input_shape[self.axis] // self.pool_size
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
-        input_shape = tuple(input.shape)
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
+        input_shape = tuple(x.shape)
         num_feature_maps = input_shape[self.axis]
         num_feature_maps_out = num_feature_maps // self.pool_size
 
@@ -653,8 +663,8 @@ class FeaturePoolLayer(Layer):
                       (num_feature_maps_out, self.pool_size) +
                       input_shape[self.axis+1:])
 
-        input_reshaped = input.reshape(pool_shape)
-        return self.pool_function(input_reshaped, axis=self.axis + 1)
+        input_reshaped = x.reshape(pool_shape)
+        return self.pool_function(input_reshaped, axis=self.axis + 1),
 
 
 class FeatureWTALayer(Layer):
@@ -696,31 +706,32 @@ class FeatureWTALayer(Layer):
                              "multiple of the region size (pool_size=%d)" %
                              (num_feature_maps, self.pool_size))
 
-    def get_output_for(self, input, **kwargs):
-        num_feature_maps = input.shape[self.axis]
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
+        num_feature_maps = x.shape[self.axis]
         num_pools = num_feature_maps // self.pool_size
 
         pool_shape = ()
         arange_shuffle_pattern = ()
         for k in range(self.axis):
-            pool_shape += (input.shape[k],)
+            pool_shape += (x.shape[k],)
             arange_shuffle_pattern += ('x',)
 
         pool_shape += (num_pools, self.pool_size)
         arange_shuffle_pattern += ('x', 0)
 
-        for k in range(self.axis + 1, input.ndim):
-            pool_shape += (input.shape[k],)
+        for k in range(self.axis + 1, x.ndim):
+            pool_shape += (x.shape[k],)
             arange_shuffle_pattern += ('x',)
 
-        input_reshaped = input.reshape(pool_shape)
+        input_reshaped = x.reshape(pool_shape)
         max_indices = T.argmax(input_reshaped, axis=self.axis + 1,
                                keepdims=True)
 
         arange = T.arange(self.pool_size).dimshuffle(*arange_shuffle_pattern)
-        mask = T.eq(max_indices, arange).reshape(input.shape)
+        mask = T.eq(max_indices, arange).reshape(x.shape)
 
-        return input * mask
+        return x * mask,
 
 
 class GlobalPoolLayer(Layer):
@@ -751,11 +762,11 @@ class GlobalPoolLayer(Layer):
         super(GlobalPoolLayer, self).__init__(incoming, **kwargs)
         self.pool_function = pool_function
 
-    def get_output_shape_for(self, input_shape):
-        return input_shape[:2]
+    def get_output_shapes_for(self, input_shapes):
+        return input_shapes[0][:2],
 
-    def get_output_for(self, input, **kwargs):
-        return self.pool_function(input.flatten(3), axis=2)
+    def get_outputs_for(self, inputs, **kwargs):
+        return self.pool_function(inputs[0].flatten(3), axis=2),
 
 
 def pool_2d_nxn_regions(inputs, output_size, mode='max'):
@@ -875,7 +886,7 @@ class SpatialPyramidPoolingLayer(Layer):
            for Visual Recognition.
            http://arxiv.org/pdf/1406.4729.pdf.
     """
-    def __init__(self, incoming, pool_dims=[4, 2, 1], mode='max',
+    def __init__(self, incoming, pool_dims=(4, 2, 1), mode='max',
                  implementation='fast', **kwargs):
             super(SpatialPyramidPoolingLayer, self).__init__(incoming,
                                                              **kwargs)
@@ -906,14 +917,15 @@ class SpatialPyramidPoolingLayer(Layer):
             self.implementation = implementation
             self.pool_dims = pool_dims
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         input_size = tuple(symb if fixed is None else fixed
                            for fixed, symb
-                           in zip(self.input_shape[2:], input.shape[2:]))
+                           in zip(self.input_shape[2:], x.shape[2:]))
         pool_list = []
         for pool_dim in self.pool_dims:
             if self.implementation == 'kaiming':
-                pool_list += pool_2d_nxn_regions(input,
+                pool_list += pool_2d_nxn_regions(x,
                                                  pool_dim,
                                                  mode=self.mode)
             else:  # pragma: no cover
@@ -921,7 +933,7 @@ class SpatialPyramidPoolingLayer(Layer):
                                  for i in input_size)
                 str_size = tuple(i // pool_dim for i in input_size)
 
-                pool = pool_2d(input,
+                pool = pool_2d(x,
                                ws=win_size,
                                stride=str_size,
                                mode=self.mode,
@@ -932,6 +944,7 @@ class SpatialPyramidPoolingLayer(Layer):
 
         return T.concatenate(pool_list, axis=2)
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         num_features = sum(p*p for p in self.pool_dims)
-        return (input_shape[0], input_shape[1], num_features)
+        return (input_shape[0], input_shape[1], num_features),

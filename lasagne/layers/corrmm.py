@@ -19,8 +19,8 @@ __all__ = [
 
 if not theano.sandbox.cuda.cuda_enabled:
     raise ImportError(
-            "requires GPU support -- see http://lasagne.readthedocs.org/en/"
-            "latest/user/installation.html#gpu-support")  # pragma: no cover
+        "requires GPU support -- see http://lasagne.readthedocs.org/en/"
+        "latest/user/installation.html#gpu-support")  # pragma: no cover
 
 
 class Conv2DMMLayer(BaseConvLayer):
@@ -136,12 +136,12 @@ class Conv2DMMLayer(BaseConvLayer):
         self.corr_mm_op = GpuCorrMM(subsample=self.stride,
                                     border_mode=border_mode)
 
-    def convolve(self, input, **kwargs):
+    def convolve(self, x, **kwargs):
         filters = self.W
         if self.flip_filters:
             filters = filters[:, :, ::-1, ::-1]  # flip top-down, left-right
 
         contiguous_filters = gpu_contiguous(filters)
-        contiguous_input = gpu_contiguous(input)
+        contiguous_input = gpu_contiguous(x)
         conved = self.corr_mm_op(contiguous_input, contiguous_filters)
         return conved

@@ -43,7 +43,8 @@ class FlattenLayer(Layer):
         if outdim < 1:
             raise ValueError('Dim must be >0, was %i', outdim)
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         to_flatten = input_shape[self.outdim - 1:]
 
         if any(s is None for s in to_flatten):
@@ -51,10 +52,10 @@ class FlattenLayer(Layer):
         else:
             flattened = int(np.prod(to_flatten))
 
-        return input_shape[:self.outdim - 1] + (flattened,)
+        return input_shape[:self.outdim - 1] + (flattened,),
 
-    def get_output_for(self, input, **kwargs):
-        return input.flatten(self.outdim)
+    def get_outputs_for(self, inputs, **kwargs):
+        return inputs[0].flatten(self.outdim),
 
 flatten = FlattenLayer  # shortcut
 
@@ -123,9 +124,10 @@ class ReshapeLayer(Layer):
             raise ValueError("`shape` cannot contain multiple -1")
         self.shape = shape
         # try computing the output shape once as a sanity check
-        self.get_output_shape_for(self.input_shape)
+        self.get_output_shape_for(self.input_shapes)
 
-    def get_output_shape_for(self, input_shape, **kwargs):
+    def get_output_shapes_for(self, input_shapes, **kwargs):
+        input_shape = input_shapes[0]
         # Initialize output shape from shape specification
         output_shape = list(self.shape)
         # First, replace all `[i]` with the corresponding input dimension, and
@@ -176,16 +178,17 @@ class ReshapeLayer(Layer):
             raise ValueError("%s cannot be reshaped to specification %s. "
                              "The total size mismatches." %
                              (input_shape, self.shape))
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         # Replace all `[i]` with the corresponding input dimension
         output_shape = list(self.shape)
         for dim, o in enumerate(output_shape):
             if isinstance(o, list):
-                output_shape[dim] = input.shape[o[0]]
+                output_shape[dim] = x.shape[o[0]]
         # Everything else is handled by Theano
-        return input.reshape(tuple(output_shape))
+        return x.reshape(tuple(output_shape)),
 
 reshape = ReshapeLayer  # shortcut
 
@@ -248,9 +251,10 @@ class DimshuffleLayer(Layer):
         self.pattern = pattern
 
         # try computing the output shape once as a sanity check
-        self.get_output_shape_for(self.input_shape)
+        self.get_output_shapes_for(self.input_shapes)
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         # Build output shape while keeping track of the dimensions that we are
         # attempting to collapse, so we can ensure that they are broadcastable
         output_shape = []
@@ -277,10 +281,10 @@ class DimshuffleLayer(Layer):
                     "broadcastable and cannot be "
                     "collapsed".format(i, dim_size))
 
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
-        return input.dimshuffle(self.pattern)
+    def get_outputs_for(self, inputs, **kwargs):
+        return inputs[0].dimshuffle(self.pattern),
 
 dimshuffle = DimshuffleLayer  # shortcut
 
@@ -318,7 +322,7 @@ class PadLayer(Layer):
         self.val = val
         self.batch_ndim = batch_ndim
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shape):
         output_shape = list(input_shape)
 
         if isinstance(self.width, int):
@@ -335,10 +339,10 @@ class PadLayer(Layer):
                 except TypeError:
                     l = r = w
                 output_shape[k + self.batch_ndim] += l + r
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
-        return padding.pad(input, self.width, self.val, self.batch_ndim)
+    def get_outputs_for(self, inputs, **kwargs):
+        return padding.pad(inputs[0], self.width, self.val, self.batch_ndim),
 
 pad = PadLayer  # shortcut
 
@@ -379,7 +383,8 @@ class SliceLayer(Layer):
         self.slice = indices
         self.axis = axis
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         output_shape = list(input_shape)
         if isinstance(self.slice, int):
             del output_shape[self.axis]
@@ -388,10 +393,11 @@ class SliceLayer(Layer):
                 range(*self.slice.indices(input_shape[self.axis])))
         else:
             output_shape[self.axis] = None
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         axis = self.axis
         if axis < 0:
-            axis += input.ndim
-        return input[(slice(None),) * axis + (self.slice,)]
+            axis += x.ndim
+        return x[(slice(None),) * axis + (self.slice,)],

@@ -12,13 +12,13 @@ from ..utils import as_tuple
 
 if not theano.sandbox.cuda.cuda_enabled:
     raise ImportError(
-            "requires GPU support -- see http://lasagne.readthedocs.org/en/"
-            "latest/user/installation.html#gpu-support")  # pragma: no cover
+        "requires GPU support -- see http://lasagne.readthedocs.org/en/"
+        "latest/user/installation.html#gpu-support")  # pragma: no cover
 elif not dnn.dnn_available():
     raise ImportError(
-            "cuDNN not available: %s\nSee http://lasagne.readthedocs.org/en/"
-            "latest/user/installation.html#cudnn" %
-            dnn.dnn_available.msg)  # pragma: no cover
+        "cuDNN not available: %s\nSee http://lasagne.readthedocs.org/en/"
+        "latest/user/installation.html#cudnn" %
+        dnn.dnn_available.msg)  # pragma: no cover
 
 
 __all__ = [
@@ -105,7 +105,8 @@ class Pool2DDNNLayer(Layer):
             raise NotImplementedError("Pool2DDNNLayer does not support "
                                       "ignore_border=False.")
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         output_shape = list(input_shape)  # copy / convert to mutable list
 
         output_shape[2] = pool_output_length(input_shape[2],
@@ -122,11 +123,12 @@ class Pool2DDNNLayer(Layer):
                                              ignore_border=True,
                                              )
 
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
-        return dnn.dnn_pool(input, self.pool_size, self.stride,
-                            self.mode, self.pad)
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
+        return dnn.dnn_pool(x, self.pool_size, self.stride,
+                            self.mode, self.pad),
 
 
 class MaxPool2DDNNLayer(Pool2DDNNLayer):
@@ -211,7 +213,8 @@ class Pool3DDNNLayer(Layer):
             raise NotImplementedError("Pool3DDNNLayer does not support "
                                       "ignore_border=False.")
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         output_shape = list(input_shape)  # copy / convert to mutable list
 
         output_shape[2] = pool_output_length(input_shape[2],
@@ -235,11 +238,12 @@ class Pool3DDNNLayer(Layer):
                                              ignore_border=True,
                                              )
 
-        return tuple(output_shape)
+        return tuple(output_shape),
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         return dnn.dnn_pool(input, self.pool_size, self.stride,
-                            self.mode, self.pad)
+                            self.mode, self.pad),
 
 
 class MaxPool3DDNNLayer(Pool3DDNNLayer):
@@ -366,14 +370,14 @@ class Conv2DDNNLayer(BaseConvLayer):
                                              untie_biases, W, b, nonlinearity,
                                              flip_filters, n=2, **kwargs)
 
-    def convolve(self, input, **kwargs):
+    def convolve(self, x, **kwargs):
         # by default we assume 'cross', consistent with corrmm.
         conv_mode = 'conv' if self.flip_filters else 'cross'
         border_mode = self.pad
         if border_mode == 'same':
             border_mode = tuple(s // 2 for s in self.filter_size)
 
-        conved = dnn.dnn_conv(img=input,
+        conved = dnn.dnn_conv(img=x,
                               kerns=self.W,
                               subsample=self.stride,
                               border_mode=border_mode,
@@ -491,14 +495,14 @@ class Conv3DDNNLayer(BaseConvLayer):
                                              untie_biases, W, b, nonlinearity,
                                              flip_filters, n=3, **kwargs)
 
-    def convolve(self, input, **kwargs):
+    def convolve(self, x, **kwargs):
         # by default we assume 'cross', consistent with corrmm.
         conv_mode = 'conv' if self.flip_filters else 'cross'
         border_mode = self.pad
         if border_mode == 'same':
             border_mode = tuple(s // 2 for s in self.filter_size)
 
-        conved = dnn.dnn_conv3d(img=input,
+        conved = dnn.dnn_conv3d(img=x,
                                 kerns=self.W,
                                 subsample=self.stride,
                                 border_mode=border_mode,
@@ -564,36 +568,38 @@ class SpatialPyramidPoolingDNNLayer(Layer):
            for Visual Recognition.
            http://arxiv.org/pdf/1406.4729.pdf.
     """
-    def __init__(self, incoming, pool_dims=[4, 2, 1], mode='max', **kwargs):
-            super(SpatialPyramidPoolingDNNLayer, self).__init__(incoming,
-                                                                **kwargs)
-            if len(self.input_shape) != 4:
-                raise ValueError("Tried to create a SPP layer with "
-                                 "input shape %r. Expected 4 input dimensions "
-                                 "(batchsize, channels, 2 spatial dimensions)."
-                                 % (self.input_shape,))
-            self.mode = mode
-            self.pool_dims = pool_dims
+    def __init__(self, incoming, pool_dims=(4, 2, 1), mode='max', **kwargs):
+        super(SpatialPyramidPoolingDNNLayer, self).__init__(incoming,
+                                                            **kwargs)
+        if len(self.input_shape) != 4:
+            raise ValueError("Tried to create a SPP layer with "
+                             "input shape %r. Expected 4 input dimensions "
+                             "(batchsize, channels, 2 spatial dimensions)."
+                             % (self.input_shape,))
+        self.mode = mode
+        self.pool_dims = pool_dims
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         input_size = tuple(symb if fixed is None else fixed
                            for fixed, symb
-                           in zip(self.input_shape[2:], input.shape[2:]))
+                           in zip(self.input_shape[2:], x.shape[2:]))
         pool_list = []
         for pool_dim in self.pool_dims:
             win_size = tuple((i + pool_dim - 1) // pool_dim
                              for i in input_size)
             str_size = tuple(i // pool_dim for i in input_size)
 
-            pool = dnn.dnn_pool(input, win_size, str_size, self.mode, (0, 0))
+            pool = dnn.dnn_pool(x, win_size, str_size, self.mode, (0, 0))
             pool = pool.flatten(3)
             pool_list.append(pool)
 
         return theano.tensor.concatenate(pool_list, axis=2)
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         num_features = sum(p*p for p in self.pool_dims)
-        return (input_shape[0], input_shape[1], num_features)
+        return (input_shape[0], input_shape[1], num_features),
 
 
 class BatchNormDNNLayer(BatchNormLayer):
@@ -673,17 +679,18 @@ class BatchNormDNNLayer(BatchNormLayer):
                  beta=init.Constant(0), gamma=init.Constant(1),
                  mean=init.Constant(0), inv_std=init.Constant(1), **kwargs):
         super(BatchNormDNNLayer, self).__init__(
-                incoming, axes, epsilon, alpha, beta, gamma, mean, inv_std,
-                **kwargs)
+            incoming, axes, epsilon, alpha, beta, gamma, mean, inv_std,
+            **kwargs)
         all_but_second_axis = (0,) + tuple(range(2, len(self.input_shape)))
         if self.axes not in ((0,), all_but_second_axis):
             raise ValueError("BatchNormDNNLayer only supports normalization "
                              "across the first axis, or across all but the "
                              "second axis, got axes=%r" % (axes,))
 
-    def get_output_for(self, input, deterministic=False,
-                       batch_norm_use_averages=None,
-                       batch_norm_update_averages=None, **kwargs):
+    def get_outputs_for(self, inputs, deterministic=False,
+                        batch_norm_use_averages=None,
+                        batch_norm_update_averages=None, **kwargs):
+        x = inputs[0]
         # Decide whether to use the stored averages or mini-batch statistics
         if batch_norm_use_averages is None:
             batch_norm_use_averages = deterministic
@@ -695,17 +702,17 @@ class BatchNormDNNLayer(BatchNormLayer):
         update_averages = batch_norm_update_averages
 
         # prepare dimshuffle pattern inserting broadcastable axes as needed
-        param_axes = iter(range(input.ndim - len(self.axes)))
+        param_axes = iter(range(x.ndim - len(self.axes)))
         pattern = ['x' if input_axis in self.axes
                    else next(param_axes)
-                   for input_axis in range(input.ndim)]
+                   for input_axis in range(x.ndim)]
         # and prepare the converse pattern removing those broadcastable axes
-        unpattern = [d for d in range(input.ndim) if d not in self.axes]
+        unpattern = [d for d in range(x.ndim) if d not in self.axes]
 
         # call cuDNN if needed, obtaining normalized outputs and statistics
         if not use_averages or update_averages:
             # cuDNN requires beta/gamma tensors; create them if needed
-            shape = tuple(s for (d, s) in enumerate(input.shape)
+            shape = tuple(s for (d, s) in enumerate(x.shape)
                           if d not in self.axes)
             gamma = self.gamma or theano.tensor.ones(shape)
             beta = self.beta or theano.tensor.zeros(shape)
@@ -713,8 +720,8 @@ class BatchNormDNNLayer(BatchNormLayer):
             (normalized,
              input_mean,
              input_inv_std) = dnn.dnn_batch_normalization_train(
-                    input, gamma.dimshuffle(pattern), beta.dimshuffle(pattern),
-                    mode, self.epsilon)
+                x, gamma.dimshuffle(pattern), beta.dimshuffle(pattern),
+                mode, self.epsilon)
 
         # normalize with stored averages, if needed
         if use_averages:
@@ -722,7 +729,7 @@ class BatchNormDNNLayer(BatchNormLayer):
             inv_std = self.inv_std.dimshuffle(pattern)
             gamma = 1 if self.gamma is None else self.gamma.dimshuffle(pattern)
             beta = 0 if self.beta is None else self.beta.dimshuffle(pattern)
-            normalized = (input - mean) * (gamma * inv_std) + beta
+            normalized = (x - mean) * (gamma * inv_std) + beta
 
         # update stored averages, if needed
         if update_averages:
@@ -742,7 +749,7 @@ class BatchNormDNNLayer(BatchNormLayer):
             dummy = 0 * (running_mean + running_inv_std).dimshuffle(pattern)
             normalized = normalized + dummy
 
-        return normalized
+        return normalized,
 
 
 def batch_norm_dnn(layer, **kwargs):

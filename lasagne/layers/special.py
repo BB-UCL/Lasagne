@@ -6,7 +6,7 @@ from .. import init
 from .. import nonlinearities
 from ..utils import as_tuple, floatX
 from ..random import get_rng
-from .base import Layer, MergeLayer
+from .base import Layer
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 
@@ -48,8 +48,8 @@ class NonlinearityLayer(Layer):
         self.nonlinearity = (nonlinearities.identity if nonlinearity is None
                              else nonlinearity)
 
-    def get_output_for(self, input, **kwargs):
-        return self.nonlinearity(input)
+    def get_outputs_for(self, inputs, **kwargs):
+        return self.nonlinearity(inputs[0]),
 
 
 class BiasLayer(Layer):
@@ -109,15 +109,16 @@ class BiasLayer(Layer):
                                  "all axes that biases are not shared over.")
             self.b = self.add_param(b, shape, 'b', regularizable=False)
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         if self.b is not None:
             bias_axes = iter(range(self.b.ndim))
             pattern = ['x' if input_axis in self.shared_axes
                        else next(bias_axes)
-                       for input_axis in range(input.ndim)]
-            return input + self.b.dimshuffle(*pattern)
+                       for input_axis in range(x.ndim)]
+            return x + self.b.dimshuffle(*pattern),
         else:
-            return input
+            return x,
 
 
 class ScaleLayer(Layer):
@@ -174,11 +175,12 @@ class ScaleLayer(Layer):
         self.scales = self.add_param(
             scales, shape, 'scales', regularizable=False)
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         axes = iter(range(self.scales.ndim))
         pattern = ['x' if input_axis in self.shared_axes
-                   else next(axes) for input_axis in range(input.ndim)]
-        return input * self.scales.dimshuffle(*pattern)
+                   else next(axes) for input_axis in range(x.ndim)]
+        return x * self.scales.dimshuffle(*pattern),
 
 
 def standardize(layer, offset, scale, shared_axes='auto'):
@@ -286,7 +288,8 @@ class ExpressionLayer(Layer):
 
         self.function = function
 
-    def get_output_shape_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         if self._output_shape is None:
             return input_shape
         elif self._output_shape is 'auto':
@@ -294,15 +297,15 @@ class ExpressionLayer(Layer):
             X = theano.tensor.alloc(0, *input_shape)
             output_shape = self.function(X).shape.eval()
             output_shape = tuple(s if s else None for s in output_shape)
-            return output_shape
+            return output_shape,
         else:
-            return self._output_shape
+            return self._output_shape,
 
-    def get_output_for(self, input, **kwargs):
-        return self.function(input)
+    def get_output_for(self, inputs, **kwargs):
+        return self.function(inputs[0]),
 
 
-class InverseLayer(MergeLayer):
+class InverseLayer(Layer):
     """
     The :class:`InverseLayer` class performs inverse operations
     for a single layer of a neural network by applying the
@@ -341,17 +344,20 @@ class InverseLayer(MergeLayer):
     def __init__(self, incoming, layer, **kwargs):
 
         super(InverseLayer, self).__init__(
-            [incoming, layer, layer.input_layer], **kwargs)
+            (incoming, layer) + layer.input_layers, max_inputs=5, **kwargs)
 
-    def get_output_shape_for(self, input_shapes):
-        return input_shapes[2]
+    def get_output_shapes_for(self, input_shapes):
+        return input_shapes[2:]
 
-    def get_output_for(self, inputs, **kwargs):
-        input, layer_out, layer_in = inputs
-        return theano.grad(None, wrt=layer_in, known_grads={layer_out: input})
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
+        layer_out = inputs[1]
+        layer_in = inputs[2:]
+        # x, layer_out, layer_in = inputs
+        return theano.grad(None, wrt=layer_in, known_grads={layer_out: x}),
 
 
-class TransformerLayer(MergeLayer):
+class TransformerLayer(Layer):
     """
     Spatial transformer layer
 
@@ -407,7 +413,7 @@ class TransformerLayer(MergeLayer):
     def __init__(self, incoming, localization_network, downsample_factor=1,
                  **kwargs):
         super(TransformerLayer, self).__init__(
-            [incoming, localization_network], **kwargs)
+            [incoming, localization_network], max_inputs=2, **kwargs)
         self.downsample_factor = as_tuple(downsample_factor, 2)
 
         input_shp, loc_shp = self.input_shapes
@@ -420,16 +426,16 @@ class TransformerLayer(MergeLayer):
                              "output shape: (batch_size, num_input_channels, "
                              "input_rows, input_columns)")
 
-    def get_output_shape_for(self, input_shapes):
+    def get_output_shapes_for(self, input_shapes):
         shape = input_shapes[0]
         factors = self.downsample_factor
         return (shape[:2] + tuple(None if s is None else int(s // f)
-                                  for s, f in zip(shape[2:], factors)))
+                                  for s, f in zip(shape[2:], factors))),
 
-    def get_output_for(self, inputs, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
         # see eq. (1) and sec 3.1 in [1]
         input, theta = inputs
-        return _transform_affine(theta, input, self.downsample_factor)
+        return _transform_affine(theta, input, self.downsample_factor),
 
 
 def _transform_affine(theta, input, downsample_factor):
@@ -548,7 +554,7 @@ def _meshgrid(height, width):
     return grid
 
 
-class TPSTransformerLayer(MergeLayer):
+class TPSTransformerLayer(Layer):
     """
     Spatial transformer layer
 
@@ -635,7 +641,7 @@ class TPSTransformerLayer(MergeLayer):
     def __init__(self, incoming, localization_network, downsample_factor=1,
                  control_points=16, precompute_grid='auto', **kwargs):
         super(TPSTransformerLayer, self).__init__(
-                [incoming, localization_network], **kwargs)
+                [incoming, localization_network], max_inputs=2, **kwargs)
 
         self.downsample_factor = as_tuple(downsample_factor, 2)
         self.control_points = control_points
@@ -673,20 +679,20 @@ class TPSTransformerLayer(MergeLayer):
                 control_points, input_shp, self.downsample_factor,
                 precompute_grid)
 
-    def get_output_shape_for(self, input_shapes):
+    def get_output_shapes_for(self, input_shapes):
         shape = input_shapes[0]
         factors = self.downsample_factor
         return (shape[:2] + tuple(None if s is None else int(s // f)
-                                  for s, f in zip(shape[2:], factors)))
+                                  for s, f in zip(shape[2:], factors))),
 
-    def get_output_for(self, inputs, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
         # see eq. (1) and sec 3.1 in [1]
         # Get input and destination control points
-        input, dest_offsets = inputs
+        x, dest_offsets = inputs
         return _transform_thin_plate_spline(
-                dest_offsets, input, self.right_mat, self.L_inv,
+                dest_offsets, x, self.right_mat, self.L_inv,
                 self.source_points, self.out_height, self.out_width,
-                self.precompute_grid, self.downsample_factor)
+                self.precompute_grid, self.downsample_factor),
 
 
 def _transform_thin_plate_spline(
@@ -990,13 +996,14 @@ class ParametricRectifierLayer(Layer):
         self.alpha = self.add_param(alpha, shape, name="alpha",
                                     regularizable=False)
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         axes = iter(range(self.alpha.ndim))
         pattern = ['x' if input_axis in self.shared_axes
                    else next(axes)
-                   for input_axis in range(input.ndim)]
+                   for input_axis in range(x.ndim)]
         alpha = self.alpha.dimshuffle(pattern)
-        return theano.tensor.nnet.relu(input, alpha)
+        return theano.tensor.nnet.relu(x, alpha),
 
 
 def prelu(layer, **kwargs):
@@ -1095,22 +1102,14 @@ class RandomizedRectifierLayer(Layer):
         else:
             self.shared_axes = shared_axes
 
-    def get_output_for(self, input, deterministic=False, **kwargs):
-        """
-        Parameters
-        ----------
-        input : tensor
-            output from the previous layer
-        deterministic : bool
-            If true, the arithmetic mean of lower and upper are used for the
-            leaky slope.
-        """
+    def get_outputs_for(self, inputs, deterministic=False, **kwargs):
+        x = inputs[0]
         if deterministic or self.upper == self.lower:
-            return theano.tensor.nnet.relu(input, (self.upper+self.lower)/2.0)
+            return theano.tensor.nnet.relu(x, (self.upper+self.lower)/2.0),
         else:
             shape = list(self.input_shape)
             if any(s is None for s in shape):
-                shape = list(input.shape)
+                shape = list(x.shape)
             for ax in self.shared_axes:
                 shape[ax] = 1
 
@@ -1119,7 +1118,7 @@ class RandomizedRectifierLayer(Layer):
                                      high=self.upper,
                                      dtype=theano.config.floatX)
             rnd = theano.tensor.addbroadcast(rnd, *self.shared_axes)
-            return theano.tensor.nnet.relu(input, rnd)
+            return theano.tensor.nnet.relu(x, rnd),
 
 
 def rrelu(layer, **kwargs):

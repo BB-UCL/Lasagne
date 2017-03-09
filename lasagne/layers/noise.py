@@ -76,21 +76,22 @@ class DropoutLayer(Layer):
         self.rescale = rescale
         self.shared_axes = tuple(shared_axes)
 
-    def get_output_for(self, input, deterministic=False, **kwargs):
+    def get_outputs_for(self, inputs, deterministic=False, **kwargs):
+        x = inputs[0]
         if deterministic or self.p == 0:
-            return input
+            return x
         else:
             # Using theano constant to prevent upcasting
             one = T.constant(1)
 
             retain_prob = one - self.p
             if self.rescale:
-                input /= retain_prob
+                x /= retain_prob
 
             # use nonsymbolic shape for dropout mask if possible
             mask_shape = self.input_shape
             if any(s is None for s in mask_shape):
-                mask_shape = input.shape
+                mask_shape = x.shape
 
             # apply dropout, respecting shared axes
             if self.shared_axes:
@@ -99,11 +100,11 @@ class DropoutLayer(Layer):
                 mask_shape = tuple(1 if a in shared_axes else s
                                    for a, s in enumerate(mask_shape))
             mask = self._srng.binomial(mask_shape, p=retain_prob,
-                                       dtype=input.dtype)
+                                       dtype=x.dtype)
             if self.shared_axes:
                 bcast = tuple(bool(s == 1) for s in mask_shape)
                 mask = T.patternbroadcast(mask, bcast)
-            return input * mask
+            return x * mask,
 
 dropout = DropoutLayer  # shortcut
 
@@ -196,18 +197,10 @@ class GaussianNoiseLayer(Layer):
         self._srng = RandomStreams(get_rng().randint(1, 2147462579))
         self.sigma = sigma
 
-    def get_output_for(self, input, deterministic=False, **kwargs):
-        """
-        Parameters
-        ----------
-        input : tensor
-            output from the previous layer
-        deterministic : bool
-            If true noise is disabled, see notes
-        """
+    def get_outputs_for(self, inputs, deterministic=False, **kwargs):
         if deterministic or self.sigma == 0:
-            return input
+            return inputs
         else:
-            return input + self._srng.normal(input.shape,
-                                             avg=0.0,
-                                             std=self.sigma)
+            return tuple(x + self._srng.normal(x.shape,
+                                               avg=0.0,
+                                               std=self.sigma) for x in inputs)

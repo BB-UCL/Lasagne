@@ -97,15 +97,16 @@ class LocalResponseNormalization2DLayer(Layer):
         if n % 2 == 0:
             raise NotImplementedError("Only works with odd n")
 
-    def get_output_shape_for(self, input_shape):
-        return input_shape
+    def get_output_shapes_for(self, input_shapes):
+        return input_shapes
 
-    def get_output_for(self, input, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
         input_shape = self.input_shape
         if any(s is None for s in input_shape):
-            input_shape = input.shape
+            input_shape = x.shape
         half_n = self.n // 2
-        input_sqr = T.sqr(input)
+        input_sqr = T.sqr(x)
         b, ch, r, c = input_shape
         extra_channels = T.alloc(0., b, ch + 2*half_n, r, c)
         input_sqr = T.set_subtensor(extra_channels[:, half_n:half_n+ch, :, :],
@@ -114,7 +115,7 @@ class LocalResponseNormalization2DLayer(Layer):
         for i in range(self.n):
             scale += self.alpha * input_sqr[:, i:i+ch, :, :]
         scale = scale ** self.beta
-        return input / scale
+        return x / scale
 
 
 class BatchNormLayer(Layer):
@@ -243,8 +244,8 @@ class BatchNormLayer(Layer):
         self.alpha = alpha
 
         # create parameters, ignoring all dimensions in axes
-        shape = [size for axis, size in enumerate(self.input_shape)
-                 if axis not in self.axes]
+        shape = tuple(size for axis, size in enumerate(self.input_shape)
+                      if axis not in self.axes)
         if any(size is None for size in shape):
             raise ValueError("BatchNormLayer needs specified input sizes for "
                              "all axes not normalized over.")
@@ -263,11 +264,12 @@ class BatchNormLayer(Layer):
         self.inv_std = self.add_param(inv_std, shape, 'inv_std',
                                       trainable=False, regularizable=False)
 
-    def get_output_for(self, input, deterministic=False,
-                       batch_norm_use_averages=None,
-                       batch_norm_update_averages=None, **kwargs):
-        input_mean = input.mean(self.axes)
-        input_inv_std = T.inv(T.sqrt(input.var(self.axes) + self.epsilon))
+    def get_outputs_for(self, inputs, deterministic=False,
+                        batch_norm_use_averages=None,
+                        batch_norm_update_averages=None, **kwargs):
+        x = inputs[0]
+        input_mean = x.mean(self.axes)
+        input_inv_std = T.inv(T.sqrt(x.var(self.axes) + self.epsilon))
 
         # Decide whether to use the stored averages or mini-batch statistics
         if batch_norm_use_averages is None:
@@ -304,10 +306,10 @@ class BatchNormLayer(Layer):
             inv_std += 0 * running_inv_std
 
         # prepare dimshuffle pattern inserting broadcastable axes as needed
-        param_axes = iter(range(input.ndim - len(self.axes)))
+        param_axes = iter(range(x.ndim - len(self.axes)))
         pattern = ['x' if input_axis in self.axes
                    else next(param_axes)
-                   for input_axis in range(input.ndim)]
+                   for input_axis in range(x.ndim)]
 
         # apply dimshuffle pattern to all parameters
         beta = 0 if self.beta is None else self.beta.dimshuffle(pattern)
@@ -316,8 +318,8 @@ class BatchNormLayer(Layer):
         inv_std = inv_std.dimshuffle(pattern)
 
         # normalize
-        normalized = (input - mean) * (gamma * inv_std) + beta
-        return normalized
+        normalized = (x - mean) * (gamma * inv_std) + beta
+        return normalized,
 
 
 def batch_norm(layer, **kwargs):

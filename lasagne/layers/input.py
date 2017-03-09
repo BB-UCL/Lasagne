@@ -3,8 +3,6 @@ from collections import OrderedDict
 import theano
 import theano.tensor as T
 
-from .. import utils
-
 from .base import Layer
 
 
@@ -50,10 +48,9 @@ class InputLayer(Layer):
     def __init__(self, shape, input_var=None, name=None, **kwargs):
         self.shape = tuple(shape)
         if any(d is not None and d <= 0 for d in self.shape):
-            raise ValueError((
-                "Cannot create InputLayer with a non-positive shape "
-                "dimension. shape=%r, self.name=%r") % (
-                    self.shape, name))
+            raise ValueError(("Cannot create InputLayer with a non-positive "
+                              "shape dimension. shape=%r, self.name=%r") %
+                             (self.shape, name))
 
         ndim = len(self.shape)
         if input_var is None:
@@ -67,10 +64,14 @@ class InputLayer(Layer):
             if input_var.ndim != ndim:
                 raise ValueError("shape has %d dimensions, but variable has "
                                  "%d" % (ndim, input_var.ndim))
+        self.input_layers = ()
+        self.max_inputs = 1
+        self.num_outputs = 1
+        self.inner_layers = ()
         self.input_var = input_var
         self.name = name
         self.params = OrderedDict()
 
-    @Layer.output_shape.getter
-    def output_shape(self):
-        return self.shape
+    @Layer.output_shapes.getter
+    def output_shapes(self):
+        return self.shape,
