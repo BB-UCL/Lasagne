@@ -71,7 +71,9 @@ class TestExpressionLayer:
 
         layer = ExpressionLayer(input_layer, func, output_shape=None)
         if X.shape == expected.shape:
-            assert layer.get_output_shape_for(X.shape) == expected.shape
+            print(expected.shape)
+            print(layer.get_output_shape_for((X.shape,)))
+            assert layer.get_output_shape_for((X.shape,)) == expected.shape
 
         output = get_output(layer, X).eval()
         assert np.allclose(output, expected)

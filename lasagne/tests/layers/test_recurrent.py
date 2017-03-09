@@ -1191,21 +1191,25 @@ def test_CustomRecurrentLayer_child_kwargs():
     # Construct mock for input-to-hidden layer
     in_to_hid = Mock(
         Layer,
-        output_shape=(in_shape[0]*in_shape[1], n_hid),
-        input_shape=(in_shape[0]*in_shape[1], in_shape[2]),
-        input_layer=InputLayer((in_shape[0]*in_shape[1], in_shape[2])),
-        get_output_kwargs=['foo'])
+        output_shapes=((in_shape[0] * in_shape[1], n_hid),),
+        output_shape=(in_shape[0] * in_shape[1], n_hid),
+        input_shape=(in_shape[0] * in_shape[1], in_shape[2]),
+        input_shapes=((in_shape[0] * in_shape[1], in_shape[2]),),
+        input_layers=(InputLayer((in_shape[0] * in_shape[1], in_shape[2])),),
+        get_outputs_kwargs=['foo'])
     # These two functions get called, need to return dummy values for them
-    in_to_hid.get_output_for.return_value = T.matrix()
+    in_to_hid.get_outputs_for.return_value = (T.matrix(),)
     in_to_hid.get_params.return_value = []
     # As above, for hidden-to-hidden layer
     hid_to_hid = Mock(
         Layer,
         output_shape=(in_shape[0], n_hid),
+        output_shapes=((in_shape[0], n_hid),),
         input_shape=(in_shape[0], n_hid),
-        input_layer=InputLayer((in_shape[0], n_hid)),
-        get_output_kwargs=[])
-    hid_to_hid.get_output_for.return_value = T.matrix()
+        input_shapes=((in_shape[0], n_hid),),
+        input_layers=(InputLayer((in_shape[0], n_hid)),),
+        get_outputs_kwargs=[])
+    hid_to_hid.get_outputs_for.return_value = (T.matrix(),)
     hid_to_hid.get_params.return_value = []
     # Construct a CustomRecurrentLayer using these Mocks
     l_rec = lasagne.layers.CustomRecurrentLayer(
@@ -1213,12 +1217,12 @@ def test_CustomRecurrentLayer_child_kwargs():
     # Call get_output with a kwarg, should be passd to in_to_hid and hid_to_hid
     helper.get_output(l_rec, foo='bar')
     # Retrieve the arguments used to call in_to_hid.get_output_for
-    args, kwargs = in_to_hid.get_output_for.call_args
+    args, kwargs = in_to_hid.get_outputs_for.call_args
     # Should be one argument - the Theano expression
     assert len(args) == 1
     # One keywould argument - should be 'foo' -> 'bar'
     assert kwargs == {'foo': 'bar'}
     # Same as with in_to_hid
-    args, kwargs = hid_to_hid.get_output_for.call_args
+    args, kwargs = hid_to_hid.get_outputs_for.call_args
     assert len(args) == 1
     assert kwargs == {'foo': 'bar'}

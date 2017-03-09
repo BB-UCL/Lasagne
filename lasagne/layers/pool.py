@@ -440,7 +440,7 @@ class Upscale1DLayer(Layer):
     def get_outputs_for(self, inputs, **kwargs):
         x = inputs[0]
         a, = self.scale_factor
-        upscaled = input
+        upscaled = x
         if self.mode == 'repeat':
             if a > 1:
                 upscaled = T.extra_ops.repeat(upscaled, a, 2)
@@ -942,7 +942,7 @@ class SpatialPyramidPoolingLayer(Layer):
                 pool = pool.flatten(3)
                 pool_list.append(pool)
 
-        return T.concatenate(pool_list, axis=2)
+        return T.concatenate(pool_list, axis=2),
 
     def get_output_shapes_for(self, input_shapes):
         input_shape = input_shapes[0]

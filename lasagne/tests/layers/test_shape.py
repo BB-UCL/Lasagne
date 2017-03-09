@@ -9,17 +9,17 @@ class TestFlattenLayer:
     @pytest.fixture
     def layer(self):
         from lasagne.layers.shape import FlattenLayer
-        return FlattenLayer(Mock(output_shape=(None,)))
+        return FlattenLayer(Mock(output_shapes=((None,), )))
 
     @pytest.fixture
     def layer_outdim3(self):
         from lasagne.layers.shape import FlattenLayer
-        return FlattenLayer(Mock(output_shape=(None,)), outdim=3)
+        return FlattenLayer(Mock(output_shapes=((None,), )), outdim=3)
 
     @pytest.fixture
     def layer_outdim1(self):
         from lasagne.layers.shape import FlattenLayer
-        return FlattenLayer(Mock(output_shape=(None,)), outdim=1)
+        return FlattenLayer(Mock(output_shapes=((None,), )), outdim=1)
 
     def test_get_output_shape_for(self, layer):
         input_shape = (2, 3, 4, 5)
@@ -77,11 +77,11 @@ class TestPadLayer:
          ])
     def test_get_output_shape_for(self, layerclass,
                                   width, input_shape, output_shape):
-        layer = layerclass(Mock(output_shape=(None,)), width=width)
+        layer = layerclass(Mock(output_shapes=((None,), )), width=width)
         assert layer.get_output_shape_for(input_shape) == output_shape
 
     def test_get_output_for(self, layerclass):
-        layer = layerclass(Mock(output_shape=(None,)), width=2)
+        layer = layerclass(Mock(output_shapes=((None,), )), width=2)
         input = np.zeros((1, 2, 10))
         trimmed = theano.shared(input[:, :, 2:-2])
         result = layer.get_output_for(trimmed).eval()
@@ -176,7 +176,7 @@ class TestReshapeLayer:
 
         # we cannot infer any of the output shapes because they are symbolic.
         output_shape = l_rshp2.get_output_shape_for(
-            (batch_size, seq_len, num_features))
+            ((batch_size, seq_len, num_features), ))
         assert output_shape == (None, None)
 
         output = get_output(l_rshp2, x)

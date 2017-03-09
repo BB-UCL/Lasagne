@@ -291,7 +291,7 @@ class ExpressionLayer(Layer):
     def get_output_shapes_for(self, input_shapes):
         input_shape = input_shapes[0]
         if self._output_shape is None:
-            return input_shape
+            return input_shape,
         elif self._output_shape is 'auto':
             input_shape = (0 if s is None else s for s in input_shape)
             X = theano.tensor.alloc(0, *input_shape)
@@ -301,7 +301,7 @@ class ExpressionLayer(Layer):
         else:
             return self._output_shape,
 
-    def get_output_for(self, inputs, **kwargs):
+    def get_outputs_for(self, inputs, **kwargs):
         return self.function(inputs[0]),
 
 
@@ -354,7 +354,7 @@ class InverseLayer(Layer):
         layer_out = inputs[1]
         layer_in = inputs[2:]
         # x, layer_out, layer_in = inputs
-        return theano.grad(None, wrt=layer_in, known_grads={layer_out: x}),
+        return theano.grad(None, wrt=layer_in, known_grads={layer_out: x})
 
 
 class TransformerLayer(Layer):

@@ -11,7 +11,9 @@ from .. import utils
 
 __all__ = [
     "get_all_layers",
+    "get_outputs",
     "get_output",
+    "get_output_shapes",
     "get_output_shape",
     "get_all_params",
     "count_params",
@@ -106,7 +108,7 @@ def get_all_layers(layer, treat_as_input=None):
     return result
 
 
-def get_output(layer_or_layers, inputs=None, **kwargs):
+def get_outputs(layer_or_layers, inputs=None, **kwargs):
     """
     Computes the output of the network at one or more given layers.
     Optionally, you can define the input(s) to propagate through the network
@@ -189,7 +191,7 @@ def get_output(layer_or_layers, inputs=None, **kwargs):
             except TypeError:
                 # If introspection is not possible, skip it
                 pass
-            accepted_kwargs |= set(layer.get_output_kwargs)
+            accepted_kwargs |= set(layer.get_outputs_kwargs)
     unused_kwargs = set(kwargs.keys()) - accepted_kwargs
     if unused_kwargs:
         suggestions = []
@@ -206,14 +208,19 @@ def get_output(layer_or_layers, inputs=None, **kwargs):
     if isinstance(layer_or_layers, (tuple, list)):
         return tuple(all_outputs[layer] for layer in layer_or_layers)
     else:
-        outputs = all_outputs[layer_or_layers]
-        if len(outputs) == 1:
-            return outputs[0]
-        else:
-            outputs
+        return all_outputs[layer_or_layers]
 
 
-def get_output_shape(layer_or_layers, input_shapes=None):
+def get_output(layer_or_layers, inputs=None, **kwargs):
+    outputs = get_outputs(layer_or_layers, inputs=inputs, **kwargs)
+    if len(outputs) == 1:
+        return outputs[0]
+    else:
+        raise ValueError("The layer has more than 1 output, "
+                         "use `get_outputs`.")
+
+
+def get_output_shapes(layer_or_layers, input_shapes=None):
     """
     Computes the output shape of the network at one or more given layers.
 
@@ -243,7 +250,7 @@ def get_output_shape(layer_or_layers, input_shapes=None):
         try:
             return [layer.output_shape for layer in layer_or_layers]
         except TypeError:
-            return layer_or_layers.output_shape
+            return layer_or_layers.output_shapes
 
     from .input import InputLayer
     # obtain topological ordering of all layers the output layer(s) depend on
@@ -275,12 +282,22 @@ def get_output_shape(layer_or_layers, input_shapes=None):
             input_shapes = ()
             for input_layer in layer.input_layers:
                 input_shapes += all_shapes[input_layer]
-            all_shapes[layer] = layer.get_output_shapes_for(input_shapes)
+            all_shapes[layer] = layer.get_output_shapes_for((input_shapes, ))
     # return the output shape(s) of the requested layer(s) only
     try:
         return [all_shapes[layer] for layer in layer_or_layers]
     except TypeError:
         return all_shapes[layer_or_layers]
+
+
+def get_output_shape(layer_or_layers, input_shapes=None):
+    output_shapes = get_output_shapes(layer_or_layers,
+                                      input_shapes=input_shapes)
+    if len(output_shapes) == 1:
+        return output_shapes[0]
+    else:
+        raise ValueError("The layer has more than 1 output, "
+                         "use `get_output_shapes`.")
 
 
 def get_all_params(layer, unwrap_shared=True, **tags):

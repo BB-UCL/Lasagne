@@ -115,18 +115,24 @@ class TestAutocrop:
 class TestConcatLayer:
     def layer(self, axis):
         from lasagne.layers.merge import ConcatLayer
-        return ConcatLayer([Mock(), Mock()], axis=axis)
+        l1 = Mock(output_shapes=((None, None),))
+        l2 = Mock(output_shapes=((None, None),))
+        return ConcatLayer((l1, l2), axis=axis)
 
     @pytest.fixture
     def crop_layer_0(self):
         from lasagne.layers.merge import ConcatLayer
-        return ConcatLayer([Mock(), Mock()], axis=0,
+        l1 = Mock(output_shapes=((None, None), ))
+        l2 = Mock(output_shapes=((None, None),))
+        return ConcatLayer((l1, l2), axis=0,
                            cropping=['lower'] * 2)
 
     @pytest.fixture
     def crop_layer_1(self):
         from lasagne.layers.merge import ConcatLayer
-        return ConcatLayer([Mock(), Mock()], axis=1,
+        l1 = Mock(output_shapes=((None, None),))
+        l2 = Mock(output_shapes=((None, None),))
+        return ConcatLayer((l1, l2), axis=1,
                            cropping=['lower'] * 2)
 
     @pytest.mark.parametrize("axis", (1, -1))
@@ -177,12 +183,16 @@ class TestElemwiseSumLayer:
     @pytest.fixture
     def layer(self):
         from lasagne.layers.merge import ElemwiseSumLayer
-        return ElemwiseSumLayer([Mock(), Mock()], coeffs=[2, -1])
+        l1 = Mock(output_shapes=((None, None),))
+        l2 = Mock(output_shapes=((None, None),))
+        return ElemwiseSumLayer((l1, l2), coeffs=[2, -1])
 
     @pytest.fixture
     def crop_layer(self):
         from lasagne.layers.merge import ElemwiseSumLayer
-        return ElemwiseSumLayer([Mock(), Mock()], coeffs=[2, -1],
+        l1 = Mock(output_shapes=((None, None),))
+        l2 = Mock(output_shapes=((None, None),))
+        return ElemwiseSumLayer((l1, l2), coeffs=[2, -1],
                                 cropping=['lower'] * 2)
 
     def test_get_output_shape_for(self, layer):
@@ -220,7 +230,9 @@ class TestElemwiseSumLayer:
     def test_bad_coeffs_fails(self, layer):
         from lasagne.layers.merge import ElemwiseSumLayer
         with pytest.raises(ValueError):
-            ElemwiseSumLayer([Mock(), Mock()], coeffs=[2, 3, -1])
+            l1 = Mock(output_shapes=((None, None),))
+            l2 = Mock(output_shapes=((None, None),))
+            ElemwiseSumLayer((l1, l2), coeffs=[2, 3, -1])
 
 
 class TestElemwiseMergeLayerMul:
@@ -228,7 +240,9 @@ class TestElemwiseMergeLayerMul:
     def layer(self):
         import theano.tensor as T
         from lasagne.layers.merge import ElemwiseMergeLayer
-        return ElemwiseMergeLayer([Mock(), Mock()], merge_function=T.mul)
+        l1 = Mock(output_shapes=((None, None),))
+        l2 = Mock(output_shapes=((None, None),))
+        return ElemwiseMergeLayer((l1, l2), merge_function=T.mul)
 
     def test_get_output_for(self, layer):
         a = numpy.array([[0, 1], [2, 3]])
@@ -246,7 +260,9 @@ class TestElemwiseMergeLayerMaximum:
     def layer(self):
         import theano.tensor as T
         from lasagne.layers.merge import ElemwiseMergeLayer
-        return ElemwiseMergeLayer([Mock(), Mock()], merge_function=T.maximum)
+        l1 = Mock(output_shapes=((None, None),))
+        l2 = Mock(output_shapes=((None, None),))
+        return ElemwiseMergeLayer((l1, l2), merge_function=T.maximum)
 
     def test_get_output_for(self, layer):
         a = numpy.array([[0, 1], [2, 3]])

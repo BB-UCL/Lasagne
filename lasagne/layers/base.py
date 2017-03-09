@@ -64,7 +64,7 @@ class Layer(object):
         self.inner_layers = inner_layers
         self.name = name
         self.params = OrderedDict()
-        self.get_output_kwargs = []
+        self.get_outputs_kwargs = []
         for shape in self.input_shapes:
             if any(d is not None and d <= 0 for d in shape):
                 raise ValueError(("Cannot create Layer with a non-positive "
@@ -224,12 +224,12 @@ class Layer(object):
         """
         raise NotImplementedError
 
-    def get_output_for(self, inputs):
+    def get_output_for(self, inputs, **kwargs):
         if self.num_outputs > 1:
             raise ValueError("The layer has more than 1 output, "
                              "use `self.output_shapes`.")
         inputs = utils.to_tuple(inputs)
-        return self.get_outputs_for(inputs)[0]
+        return self.get_outputs_for(inputs, **kwargs)[0]
 
     def add_param(self, spec, shape, name=None, **tags):
         """

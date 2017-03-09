@@ -115,7 +115,7 @@ class LocalResponseNormalization2DLayer(Layer):
         for i in range(self.n):
             scale += self.alpha * input_sqr[:, i:i+ch, :, :]
         scale = scale ** self.beta
-        return x / scale
+        return x / scale,
 
 
 class BatchNormLayer(Layer):

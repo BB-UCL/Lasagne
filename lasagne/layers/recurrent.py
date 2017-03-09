@@ -220,7 +220,8 @@ class CustomRecurrentLayer(Layer):
             incoming.append(hid_init)
             self.hid_init_incoming_index = len(incoming)-1
 
-        super(CustomRecurrentLayer, self).__init__(incoming, **kwargs)
+        super(CustomRecurrentLayer, self).__init__(incoming, max_inputs=3,
+                                                   **kwargs)
 
         input_to_hidden_in_layers = \
             [layer for layer in helper.get_all_layers(input_to_hidden)

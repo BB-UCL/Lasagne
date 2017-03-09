@@ -322,7 +322,8 @@ class PadLayer(Layer):
         self.val = val
         self.batch_ndim = batch_ndim
 
-    def get_output_shapes_for(self, input_shape):
+    def get_output_shapes_for(self, input_shapes):
+        input_shape = input_shapes[0]
         output_shape = list(input_shape)
 
         if isinstance(self.width, int):

@@ -484,7 +484,9 @@ def to_tuple(x):
 
 
 def shape_to_tuple(shape):
-    if isinstance(shape[0], int) or shape[0] is None:
+    if isinstance(shape, (T.TensorVariable, T.Variable)):
+        return shape,
+    elif isinstance(shape[0], int) or shape[0] is None:
         return shape,
     else:
         return shape

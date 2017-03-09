@@ -263,7 +263,7 @@ class TestMaxPool1DLayer:
                     yield (pool_size, stride, pad)
 
     def input_layer(self, output_shape):
-        return Mock(output_shape=output_shape)
+        return Mock(output_shapes=(output_shape, ))
 
     def layer(self, input_layer, pool_size, stride=None, pad=0):
         from lasagne.layers.pool import MaxPool1DLayer
@@ -349,7 +349,7 @@ class TestMaxPool2DLayer:
                     yield (pool_size, stride, pad)
 
     def input_layer(self, output_shape):
-        return Mock(output_shape=output_shape)
+        return Mock(output_shapes=(output_shape, ))
 
     def layer(self, input_layer, pool_size, stride=None,
               pad=(0, 0), ignore_border=False):
@@ -447,7 +447,7 @@ class TestMaxPool2DCCLayer:
                 yield (pool_size, stride)
 
     def input_layer(self, output_shape):
-        return Mock(output_shape=output_shape)
+        return Mock(output_shapes=(output_shape, ))
 
     def layer(self, input_layer, pool_size, stride):
         try:
@@ -560,7 +560,7 @@ class TestMaxPool2DNNLayer:
                     yield (pool_size, stride, pad)
 
     def input_layer(self, output_shape):
-        return Mock(output_shape=output_shape)
+        return Mock(output_shapes=(output_shape, ))
 
     def layer(self, input_layer, pool_size, stride, pad):
         try:
@@ -652,7 +652,7 @@ class TestMaxPool3DNNLayer:
                     yield (pool_size, stride, pad)
 
     def input_layer(self, output_shape):
-        return Mock(output_shape=output_shape)
+        return Mock(output_shapes=(output_shape, ))
 
     def layer(self, input_layer, pool_size, stride, pad):
         try:
@@ -748,7 +748,7 @@ class TestUpscale1DLayer:
             yield mode
 
     def input_layer(self, output_shape):
-        return Mock(output_shape=output_shape)
+        return Mock(output_shapes=(output_shape,))
 
     def layer(self, input_layer, scale_factor, mode):
         from lasagne.layers.pool import Upscale1DLayer
@@ -830,7 +830,7 @@ class TestUpscale2DLayer:
             yield mode
 
     def input_layer(self, output_shape):
-        return Mock(output_shape=output_shape)
+        return Mock(output_shapes=(output_shape,))
 
     def layer(self, input_layer, scale_factor, mode):
         from lasagne.layers.pool import Upscale2DLayer
@@ -916,7 +916,7 @@ class TestUpscale3DLayer:
             yield mode
 
     def input_layer(self, output_shape):
-        return Mock(output_shape=output_shape)
+        return Mock(output_shapes=(output_shape,))
 
     def layer(self, input_layer, scale_factor, mode):
         from lasagne.layers.pool import Upscale3DLayer
@@ -1034,7 +1034,7 @@ class TestGlobalPoolLayer(object):
 
     @pytest.fixture
     def layer(self, GlobalPoolLayer):
-        return GlobalPoolLayer(Mock(output_shape=(None,)))
+        return GlobalPoolLayer(Mock(output_shapes=((None, ), )))
 
     def test_get_output_shape_for(self, layer):
         assert layer.get_output_shape_for((2, 3, 4, 5)) == (2, 3)
@@ -1055,7 +1055,7 @@ class TestSpatialPyramidPoolingDNNLayer:
             yield pool_dims
 
     def input_layer(self, output_shape):
-        return Mock(output_shape=output_shape)
+        return Mock(output_shapes=(output_shape,))
 
     def layer(self, input_layer, pool_dims):
         try:
@@ -1125,7 +1125,7 @@ class TestSpatialPyramidPoolingLayer:
             yield pool_dims
 
     def input_layer(self, output_shape):
-        return Mock(output_shape=output_shape)
+        return Mock(output_shapes=(output_shape,))
 
     def layer(self, input_layer, pool_dims, mode='max', implementation='fast'):
         from lasagne.layers import SpatialPyramidPoolingLayer
@@ -1162,7 +1162,6 @@ class TestSpatialPyramidPoolingLayer:
             layer = self.layer(input_layer, pool_dims)
 
             result = layer.get_output_for(input_theano)
-
             result_eval = result.eval()
             numpy_result = spatial_pool(input, pool_dims)
 

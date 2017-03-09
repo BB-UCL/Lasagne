@@ -119,7 +119,7 @@ class TestGaussianNoiseLayer:
     @pytest.fixture
     def layer(self):
         from lasagne.layers.noise import GaussianNoiseLayer
-        return GaussianNoiseLayer(Mock(output_shape=(None,)))
+        return GaussianNoiseLayer(Mock(output_shapes=((None,), )))
 
     @pytest.fixture(params=[(100, 100), (None, 100)])
     def input_layer(self, request):

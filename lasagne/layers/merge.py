@@ -259,7 +259,7 @@ class ConcatLayer(Layer):
         for :func:`autocrop`. Cropping is always disabled for `axis`.
     """
     def __init__(self, incoming, axis=1, cropping=None, **kwargs):
-        super(ConcatLayer, self).__init__(incoming, **kwargs)
+        super(ConcatLayer, self).__init__(incoming, max_inputs=100, **kwargs)
         self.axis = axis
         if cropping is not None:
             # If cropping is enabled, don't crop on the selected axis
@@ -323,7 +323,8 @@ class ElemwiseMergeLayer(Layer):
     """
 
     def __init__(self, incoming, merge_function, cropping=None, **kwargs):
-        super(ElemwiseMergeLayer, self).__init__(incoming, **kwargs)
+        super(ElemwiseMergeLayer, self)\
+            .__init__(incoming, max_inputs=100, **kwargs)
         self.merge_function = merge_function
         self.cropping = cropping
 
@@ -337,12 +338,12 @@ class ElemwiseMergeLayer(Layer):
         def match(shape1, shape2):
             return (len(shape1) == len(shape2) and
                     all(s1 is None or s2 is None or s1 == s2
-                        for s1, s2 in zip(shape1, shape2))),
+                        for s1, s2 in zip(shape1, shape2)))
 
             # Check for compatibility with inferred output shape
         if not all(match(shape, output_shape) for shape in input_shapes):
             raise ValueError("Mismatch: not all input shapes are the same")
-        return output_shape
+        return output_shape,
 
     def get_outputs_for(self, inputs, **kwargs):
         inputs = autocrop(inputs, self.cropping)

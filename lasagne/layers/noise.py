@@ -95,7 +95,7 @@ class DropoutLayer(Layer):
 
             # apply dropout, respecting shared axes
             if self.shared_axes:
-                shared_axes = tuple(a if a >= 0 else a + input.ndim
+                shared_axes = tuple(a if a >= 0 else a + x.ndim
                                     for a in self.shared_axes)
                 mask_shape = tuple(1 if a in shared_axes else s
                                    for a, s in enumerate(mask_shape))
