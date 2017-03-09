@@ -775,7 +775,7 @@ class TransposedConv2DLayer(BaseConvLayer):
             size = self.output_size
             if isinstance(self.output_size, T.Variable):
                 size = (None, None)
-            return input_shape[0], self.num_filters, size[0], size[1]
+            return (input_shape[0], self.num_filters, size[0], size[1]),
 
         # If self.output_size is not specified, return the smallest shape
         # when called from the constructor, self.crop is still called self.pad:

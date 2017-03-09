@@ -94,8 +94,6 @@ def get_all_layers(layer, treat_as_input=None):
             seen.add(layer)
             if hasattr(layer, 'input_layers'):
                 queue.extendleft(reversed(layer.input_layers))
-            elif hasattr(layer, 'input_layer'):
-                queue.appendleft(layer.input_layer)
         else:
             # We've been here before: Either we've finished all its incomings,
             # or we've detected a cycle. In both cases, we remove the layer

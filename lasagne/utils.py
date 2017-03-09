@@ -474,3 +474,17 @@ def unroll_scan(fn, sequences, outputs_info, non_sequences, n_steps,
             output_scan.append(T.stack(*l))
 
         return output_scan
+
+
+def to_tuple(x):
+    if isinstance(x, (tuple, list)):
+        return x
+    else:
+        return x,
+
+
+def shape_to_tuple(shape):
+    if isinstance(shape[0], int) or shape[0] is None:
+        return shape,
+    else:
+        return shape

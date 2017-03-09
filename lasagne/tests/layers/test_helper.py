@@ -123,16 +123,16 @@ class TestGetOutput_Layer:
         from lasagne.layers.base import Layer
         from lasagne.layers.input import InputLayer
         # create a mock that has the same attributes as an InputLayer instance
-        l1 = Mock(InputLayer((None,)), output_shape=(None,),
+        l1 = Mock(InputLayer((None,)), output_shapes=((None,), ),
                   get_output_kwargs=[])
         # create a mock that has the same attributes as a Layer instance
-        l2 = Mock(Layer(l1), output_shape=(None,), get_output_kwargs=[])
+        l2 = Mock(Layer(l1), output_shapes=((None,), ), get_output_kwargs=[])
         # link it to the InputLayer mock
-        l2.input_layer = l1
+        l2.input_layers = (l1, )
         # create another mock that has the same attributes as a Layer instance
-        l3 = Mock(Layer(l2), output_shape=(None,), get_output_kwargs=['kwarg'])
+        l3 = Mock(Layer(l2), output_shapes=((None,), ), get_output_kwargs=['kwarg'])
         # link it to the first mock, to get an "l1 --> l2 --> l3" chain
-        l3.input_layer = l2
+        l3.input_layers = (l2, )
         return l1, l2, l3
 
     def test_get_output_without_arguments(self, layers, get_output):
@@ -286,23 +286,23 @@ class TestGetOutput_MergeLayer:
 
     @pytest.fixture
     def layers(self):
-        from lasagne.layers.base import Layer, MergeLayer
+        from lasagne.layers.base import Layer
         from lasagne.layers.input import InputLayer
         # create two mocks of the same attributes as an InputLayer instance
-        l1 = [Mock(InputLayer((None,)), output_shape=(None,),
+        l1 = [Mock(InputLayer((None,)), output_shapes=((None,), ),
                    get_output_kwargs=[]),
-              Mock(InputLayer((None,)), output_shape=(None,),
+              Mock(InputLayer((None,)), output_shapes=((None,), ),
                    get_output_kwargs=[])]
         # create two mocks of the same attributes as a Layer instance
-        l2 = [Mock(Layer(l1[0]), output_shape=(None,),
+        l2 = [Mock(Layer(l1[0]), output_shapes=((None,), ),
                    get_output_kwargs=[]),
-              Mock(Layer(l1[1]), output_shape=(None,),
+              Mock(Layer(l1[1]), output_shapes=((None,), ),
                    get_output_kwargs=[])]
         # link them to the InputLayer mocks
-        l2[0].input_layer = l1[0]
-        l2[1].input_layer = l1[1]
+        l2[0].input_layers = (l1[0], )
+        l2[1].input_layers = (l1[1], )
         # create a mock that has the same attributes as a MergeLayer
-        l3 = Mock(MergeLayer(l2), get_output_kwargs=['kwarg'])
+        l3 = Mock(Layer(l2), get_output_kwargs=['kwarg'])
         # link it to the two layer mocks, to get the following network:
         # l1[0] --> l2[0] --> l3
         # l1[1] --> l2[1] ----^
@@ -431,7 +431,7 @@ class TestGetOutput_MergeLayer:
         from lasagne.layers.base import MergeLayer
         return MergeLayer([
             (None, 20),
-            Mock(InputLayer((None,)), output_shape=(None,))])
+            Mock(InputLayer((None,)), output_shapes=((None,), ))])
 
     def test_layer_from_shape_invalid_get_output(self, layer_from_shape,
                                                  get_output):
@@ -490,15 +490,15 @@ class TestGetOutputShape_Layer:
         from lasagne.layers.base import Layer
         from lasagne.layers.input import InputLayer
         # create a mock that has the same attributes as an InputLayer instance
-        l1 = Mock(InputLayer((None,)), output_shape=(None,))
+        l1 = Mock(InputLayer((None,)), output_shapes=((None,), ), input_layers=())
         # create a mock that has the same attributes as a Layer instance
-        l2 = Mock(Layer(l1), output_shape=(None,))
+        l2 = Mock(Layer(l1), output_shapes=((None,), ))
         # link it to the InputLayer mock
-        l2.input_layer = l1
+        l2.input_layers = (l1, )
         # create another mock that has the same attributes as a Layer instance
-        l3 = Mock(Layer(l2), output_shape=(None,))
+        l3 = Mock(Layer(l2), output_shapes=((None,), ))
         # link it to the first mock, to get an "l1 --> l2 --> l3" chain
-        l3.input_layer = l2
+        l3.input_layers = (l2, )
         return l1, l2, l3
 
     def test_get_output_shape_without_arguments(self, layers,
@@ -593,19 +593,19 @@ class TestGetOutputShape_MergeLayer:
 
     @pytest.fixture
     def layers(self):
-        from lasagne.layers.base import Layer, MergeLayer
+        from lasagne.layers.base import Layer
         from lasagne.layers.input import InputLayer
         # create two mocks of the same attributes as an InputLayer instance
-        l1 = [Mock(InputLayer((None,)), output_shape=(None,)),
-              Mock(InputLayer((None,)), output_shape=(None,))]
+        l1 = [Mock(InputLayer((None,)), output_shapes=((None,), )),
+              Mock(InputLayer((None,)), output_shapes=((None,), ))]
         # create two mocks of the same attributes as a Layer instance
-        l2 = [Mock(Layer(l1[0]), output_shape=(None,)),
-              Mock(Layer(l1[1]), output_shape=(None,))]
+        l2 = [Mock(Layer(l1[0]), output_shapes=((None,), )),
+              Mock(Layer(l1[1]), output_shapes=((None,), ))]
         # link them to the InputLayer mocks
-        l2[0].input_layer = l1[0]
-        l2[1].input_layer = l1[1]
+        l2[0].input_layers = (l1[0], )
+        l2[1].input_layers = (l1[1], )
         # create a mock that has the same attributes as a MergeLayer
-        l3 = Mock(MergeLayer(l2))
+        l3 = Mock(Layer(l2))
         # link it to the two layer mocks, to get the following network:
         # l1[0] --> l2[0] --> l3
         # l1[1] --> l2[1] ----^
@@ -691,10 +691,10 @@ class TestGetOutputShape_MergeLayer:
     @pytest.fixture
     def layer_from_shape(self):
         from lasagne.layers.input import InputLayer
-        from lasagne.layers.base import MergeLayer
-        return MergeLayer([
+        from lasagne.layers.base import Layer
+        return Layer([
             (None, 20),
-            Mock(InputLayer((None,)), output_shape=(None,))])
+            Mock(InputLayer((None,)), output_shapes=((None,), ))])
 
     def test_layer_from_shape_valid_get_output_shape(self, layer_from_shape,
                                                      get_output_shape):

@@ -19,8 +19,8 @@ class TestLayer:
         assert layer.input_shapes == layer.input_layers[0].output_shapes
 
     def test_get_output_shape_for(self, layer):
-        shape = Mock()
-        assert layer.get_output_shape_for(shape) == shape
+        shape = (Mock(), Mock())
+        assert layer.get_output_shape_for((shape,)) == shape
 
     @pytest.fixture
     def layer_from_shape(self):

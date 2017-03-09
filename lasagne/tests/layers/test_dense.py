@@ -2,8 +2,6 @@ from mock import Mock
 import numpy as np
 import pytest
 import theano
-
-
 import lasagne
 
 
@@ -146,7 +144,7 @@ class TestNINLayer:
         mock = Mock(input_layer)
         mock.shape = input_layer.shape
         mock.input_var = input_layer.input_var
-        mock.output_shape = input_layer.output_shape
+        mock.output_shapes = input_layer.output_shapes
         return mock
 
     @pytest.fixture
@@ -273,7 +271,7 @@ class TestNINLayer_c01b:
         mock = Mock(input_layer)
         mock.shape = input_layer.shape
         mock.input_var = input_layer.input_var
-        mock.output_shape = input_layer.output_shape
+        mock.output_shapes = input_layer.output_shapes
         return mock
 
     @pytest.fixture

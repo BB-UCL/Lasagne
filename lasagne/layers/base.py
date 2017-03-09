@@ -195,10 +195,12 @@ class Layer(object):
         if self.num_outputs > 1:
             raise ValueError("The layer has more than 1 output, "
                              "use `self.output_shapes`.")
-        return self.get_output_shapes_for(input_shapes)
+        input_shapes = utils.shape_to_tuple(input_shapes)
+        return self.get_output_shapes_for(input_shapes)[0]
 
     def get_outputs_for(self, inputs, **kwargs):
         """
+        !!! Should always check if inputs is or not a list
         Propagates the given input through this layer (and only this layer).
 
         Parameters
@@ -222,11 +224,12 @@ class Layer(object):
         """
         raise NotImplementedError
 
-    def get_output_for(self, input_shapes):
+    def get_output_for(self, inputs):
         if self.num_outputs > 1:
             raise ValueError("The layer has more than 1 output, "
                              "use `self.output_shapes`.")
-        return self.get_outputs_for(input_shapes)
+        inputs = utils.to_tuple(inputs)
+        return self.get_outputs_for(inputs)[0]
 
     def add_param(self, spec, shape, name=None, **tags):
         """
