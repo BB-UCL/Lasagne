@@ -123,27 +123,29 @@ class TestGetOutput_Layer:
         from lasagne.layers.base import Layer
         from lasagne.layers.input import InputLayer
         # create a mock that has the same attributes as an InputLayer instance
-        l1 = Mock(InputLayer((None,)), output_shapes=((None,), ),
-                  get_outputs_kwargs=[])
+        l1 = Mock(InputLayer((None,)), output_shapes=((None,),),
+                  input_layers=(), get_outputs_kwargs=[])
+        l1.get_outputs_for.return_value = (Mock(),)
         # create a mock that has the same attributes as a Layer instance
-        l2 = Mock(Layer(l1), output_shapes=((None,), ), get_outputs_kwargs=[])
-        # link it to the InputLayer mock
-        l2.input_layers = (l1, )
+        l2 = Mock(Layer(l1), output_shapes=((None,),),
+                  input_layers=(l1,), get_outputs_kwargs=[])
+        l2.get_outputs_for.return_value = (Mock(),)
         # create another mock that has the same attributes as a Layer instance
-        l3 = Mock(Layer(l2), output_shapes=((None,), ), get_outputs_kwargs=['kwarg'])
+        l3 = Mock(Layer(l2), output_shapes=((None,),),
+                  input_layers=(l2,), get_outputs_kwargs=['kwarg'])
+        l3.get_outputs_for.return_value = (Mock(),)
         # link it to the first mock, to get an "l1 --> l2 --> l3" chain
-        l3.input_layers = (l2, )
         return l1, l2, l3
 
     def test_get_output_without_arguments(self, layers, get_outputs):
         l1, l2, l3 = layers
         output = get_outputs(l3)
         # expected: l3.get_output_for(l2.get_output_for(l1.input_var))
-        assert output is (l3.get_output_for.return_value, )
-        l3.get_output_for.assert_called_with(
-            l2.get_output_for.return_value)
-        l2.get_output_for.assert_called_with(
-            l1.input_var)
+        assert output == l3.get_outputs_for.return_value
+        l3.get_outputs_for.assert_called_with(
+            l2.get_outputs_for.return_value)
+        l2.get_outputs_for.assert_called_with(
+            (l1.input_var, ))
 
     def test_get_output_with_single_argument(self, layers, get_outputs):
         l1, l2, l3 = layers
@@ -151,11 +153,11 @@ class TestGetOutput_Layer:
         output = get_outputs(l3, inputs, kwarg=kwarg)
         # expected: l3.get_output_for(l2.get_output_for(inputs, kwarg=kwarg),
         #                             kwarg=kwarg)
-        assert output == (l3.get_output_for.return_value, )
-        l3.get_output_for.assert_called_with(
-            l2.get_output_for.return_value, kwarg=kwarg)
-        l2.get_output_for.assert_called_with(
-            inputs, kwarg=kwarg)
+        assert output == l3.get_outputs_for.return_value
+        l3.get_outputs_for.assert_called_with(
+            l2.get_outputs_for.return_value, kwarg=kwarg)
+        l2.get_outputs_for.assert_called_with(
+            (inputs, ), kwarg=kwarg)
 
     def test_get_output_input_is_a_mapping(self, layers, get_outputs):
         l1, l2, l3 = layers
@@ -174,11 +176,11 @@ class TestGetOutput_Layer:
         l1, l2, l3 = layers
         output = get_outputs(l3, {})
         # expected: l3.get_output_for(l2.get_output_for(l1.input_var))
-        assert output == (l3.get_output_for.return_value, )
-        l3.get_output_for.assert_called_with(
-            l2.get_output_for.return_value)
-        l2.get_output_for.assert_called_with(
-            l1.input_var)
+        assert output == l3.get_outputs_for.return_value
+        l3.get_outputs_for.assert_called_with(
+            l2.get_outputs_for.return_value)
+        l2.get_outputs_for.assert_called_with(
+            (l1.input_var, ))
 
     def test_get_output_input_is_a_mapping_to_array(self, layers, get_outputs):
         l1, l2, l3 = layers
@@ -194,7 +196,8 @@ class TestGetOutput_Layer:
         # l1.input_var should not have been accessed
         assert p.call_count == 0
 
-    def test_get_output_input_is_a_mapping_for_layer(self, layers, get_outputs):
+    def test_get_output_input_is_a_mapping_for_layer(self, layers,
+                                                     get_outputs):
         l1, l2, l3 = layers
         p = PropertyMock()
         type(l1).input_var = p
@@ -202,10 +205,10 @@ class TestGetOutput_Layer:
         inputs = {l2: input_expr}
         output = get_outputs(l3, inputs, kwarg=kwarg)
         # expected: l3.get_output_for(input_expr, kwarg=kwarg)
-        assert output == (l3.get_output_for.return_value, )
-        l3.get_output_for.assert_called_with(input_expr, kwarg=kwarg)
+        assert output == l3.get_outputs_for.return_value
+        l3.get_outputs_for.assert_called_with((input_expr,), kwarg=kwarg)
         # l2.get_output_for should not have been called
-        assert l2.get_output_for.call_count == 0
+        assert l2.get_outputs_for.call_count == 0
         # l1.input_var should not have been accessed
         assert p.call_count == 0
 
@@ -220,17 +223,17 @@ class TestGetOutput_Layer:
         # expected: l3.get_output_for(l2.get_output_for(input_expr,
         #                                               kwarg=kwarg),
         #                             kwarg=kwarg)
-        assert output == (l3.get_output_for.return_value, )
-        l3.get_output_for.assert_called_with(
-            l2.get_output_for.return_value, kwarg=kwarg)
-        l2.get_output_for.assert_called_with(
-            input_expr, kwarg=kwarg)
+        assert output == l3.get_outputs_for.return_value
+        l3.get_outputs_for.assert_called_with(
+            l2.get_outputs_for.return_value, kwarg=kwarg)
+        l2.get_outputs_for.assert_called_with(
+            (input_expr, ), kwarg=kwarg)
         # l1.input_var should not have been accessed
         assert p.call_count == 0
 
     def test_get_output_with_unused_kwarg(self, layers, get_outputs):
         l1, l2, l3 = layers
-        l2.get_output_for = lambda data, asdf=123, **kwargs: data
+        l2.get_outputs_for = lambda data, asdf=123, **kwargs: (data,)
         unused_kwarg = object()
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter('always')
@@ -289,24 +292,26 @@ class TestGetOutput_MergeLayer:
         from lasagne.layers.base import Layer
         from lasagne.layers.input import InputLayer
         # create two mocks of the same attributes as an InputLayer instance
-        l1 = [Mock(InputLayer((None,)), output_shapes=((None,), ),
-                   get_outputs_kwargs=[]),
+        l1 = (Mock(InputLayer((None,)), output_shapes=((None,), ),
+                   input_layers=(), get_outputs_kwargs=[]),
               Mock(InputLayer((None,)), output_shapes=((None,), ),
-                   get_outputs_kwargs=[])]
+                   input_layers=(), get_outputs_kwargs=[]))
+        l1[0].get_outputs_for.return_value = (Mock(),)
+        l1[1].get_outputs_for.return_value = (Mock(),)
         # create two mocks of the same attributes as a Layer instance
-        l2 = [Mock(Layer(l1[0]), output_shapes=((None,), ),
-                   get_outputs_kwargs=[]),
+        l2 = (Mock(Layer(l1[0]), output_shapes=((None,), ),
+                   input_layers=(l1[0], ), get_outputs_kwargs=[]),
               Mock(Layer(l1[1]), output_shapes=((None,), ),
-                   get_outputs_kwargs=[])]
-        # link them to the InputLayer mocks
-        l2[0].input_layers = (l1[0], )
-        l2[1].input_layers = (l1[1], )
+                   input_layers=(l1[1], ), get_outputs_kwargs=[]))
+        l2[0].get_outputs_for.return_value = (Mock(),)
+        l2[1].get_outputs_for.return_value = (Mock(),)
         # create a mock that has the same attributes as a MergeLayer
-        l3 = Mock(Layer(l2), get_outputs_kwargs=['kwarg'])
+        l3 = Mock(Layer(l2, max_inputs=2),
+                  input_layers=l2, get_outputs_kwargs=['kwarg'])
+        l3.get_outputs_for.return_value = (Mock(),)
         # link it to the two layer mocks, to get the following network:
         # l1[0] --> l2[0] --> l3
         # l1[1] --> l2[1] ----^
-        l3.input_layers = l2
         return l1, l2, l3
 
     def test_get_output_without_arguments(self, layers, get_outputs):
@@ -314,15 +319,14 @@ class TestGetOutput_MergeLayer:
         output = get_outputs(l3)
         # expected: l3.get_output_for([l2[0].get_output_for(l1[0].input_var),
         #                              l2[1].get_output_for(l1[1].input_var)])
-        assert output is l3.get_output_for.return_value
-        l3.get_output_for.assert_called_with([
-            l2[0].get_output_for.return_value,
-            l2[1].get_output_for.return_value,
-            ])
-        l2[0].get_output_for.assert_called_with(
-            l1[0].input_var)
-        l2[1].get_output_for.assert_called_with(
-            l1[1].input_var)
+        assert output == l3.get_outputs_for.return_value
+        l3.get_outputs_for.assert_called_with(
+            l2[0].get_outputs_for.return_value +
+            l2[1].get_outputs_for.return_value)
+        l2[0].get_outputs_for.assert_called_with(
+            (l1[0].input_var, ))
+        l2[1].get_outputs_for.assert_called_with(
+            (l1[1].input_var, ))
 
     def test_get_output_with_single_argument_fails(self, layers, get_outputs):
         l1, l2, l3 = layers
@@ -338,11 +342,11 @@ class TestGetOutput_MergeLayer:
         type(l1[1]).input_var = p
         inputs = {l3: theano.tensor.matrix()}
         # expected: inputs[l3]
-        assert get_outputs(l3, inputs) is inputs[l3]
+        assert get_outputs(l3, inputs) == (inputs[l3], )
         # l3.get_output_for, l2[*].get_output_for should not have been called
-        assert l3.get_output_for.call_count == 0
-        assert l2[0].get_output_for.call_count == 0
-        assert l2[1].get_output_for.call_count == 0
+        assert l3.get_outputs_for.call_count == 0
+        assert l2[0].get_outputs_for.call_count == 0
+        assert l2[1].get_outputs_for.call_count == 0
         # l1[*].input_var should not have been accessed
         assert p.call_count == 0
 
@@ -351,15 +355,14 @@ class TestGetOutput_MergeLayer:
         output = get_outputs(l3, {})
         # expected: l3.get_output_for([l2[0].get_output_for(l1[0].input_var),
         #                              l2[1].get_output_for(l1[1].input_var)])
-        assert output is l3.get_output_for.return_value
-        l3.get_output_for.assert_called_with([
-            l2[0].get_output_for.return_value,
-            l2[1].get_output_for.return_value,
-            ])
-        l2[0].get_output_for.assert_called_with(
-            l1[0].input_var)
-        l2[1].get_output_for.assert_called_with(
-            l1[1].input_var)
+        assert output == l3.get_outputs_for.return_value
+        l3.get_outputs_for.assert_called_with((
+            l2[0].get_outputs_for.return_value +
+            l2[1].get_outputs_for.return_value))
+        l2[0].get_outputs_for.assert_called_with(
+            (l1[0].input_var, ))
+        l2[1].get_outputs_for.assert_called_with(
+            (l1[1].input_var, ))
 
     def test_get_output_input_is_a_mapping_to_array(self, layers, get_outputs):
         l1, l2, l3 = layers
@@ -369,15 +372,16 @@ class TestGetOutput_MergeLayer:
         inputs = {l3: [[1, 2, 3]]}
         output = get_outputs(l3, inputs)
         # expected: inputs[l3]
-        assert numpy.all(output.eval() == inputs[l3])
+        assert numpy.all(output[0].eval() == inputs[l3])
         # l3.get_output_for, l2[*].get_output_for should not have been called
-        assert l3.get_output_for.call_count == 0
-        assert l2[0].get_output_for.call_count == 0
-        assert l2[1].get_output_for.call_count == 0
+        assert l3.get_outputs_for.call_count == 0
+        assert l2[0].get_outputs_for.call_count == 0
+        assert l2[1].get_outputs_for.call_count == 0
         # l1[*].input_var should not have been accessed
         assert p.call_count == 0
 
-    def test_get_output_input_is_a_mapping_for_layer(self, layers, get_outputs):
+    def test_get_output_input_is_a_mapping_for_layer(self, layers,
+                                                     get_outputs):
         l1, l2, l3 = layers
         p = PropertyMock()
         type(l1[0]).input_var = p
@@ -388,15 +392,15 @@ class TestGetOutput_MergeLayer:
         #                              l2[1].get_output_for(l1[1].input_var,
         #                                                   kwarg=kwarg)],
         #                              kwarg=kwarg)
-        assert output is l3.get_output_for.return_value
-        l3.get_output_for.assert_called_with([
-            input_expr,
-            l2[1].get_output_for.return_value,
-            ], kwarg=kwarg)
-        l2[1].get_output_for.assert_called_with(
-            l1[1].input_var, kwarg=kwarg)
+        assert output == l3.get_outputs_for.return_value
+        l3.get_outputs_for.assert_called_with(
+            (input_expr, ) +
+            l2[1].get_outputs_for.return_value,
+            kwarg=kwarg)
+        l2[1].get_outputs_for.assert_called_with(
+            (l1[1].input_var, ), kwarg=kwarg)
         # l2[0].get_output_for should not have been called
-        assert l2[0].get_output_for.call_count == 0
+        assert l2[0].get_outputs_for.call_count == 0
         # l1[0].input_var should not have been accessed
         assert p.call_count == 0
 
@@ -413,15 +417,15 @@ class TestGetOutput_MergeLayer:
         #                              l2[1].get_output_for(l1[1].input_var,
         #                                                   kwarg=kwarg)],
         #                              kwarg=kwarg)
-        assert output is l3.get_output_for.return_value
-        l3.get_output_for.assert_called_with([
-            l2[0].get_output_for.return_value,
-            l2[1].get_output_for.return_value,
-            ], kwarg=kwarg)
-        l2[0].get_output_for.assert_called_with(
-            input_expr, kwarg=kwarg)
-        l2[1].get_output_for.assert_called_with(
-            l1[1].input_var, kwarg=kwarg)
+        assert output == l3.get_outputs_for.return_value
+        l3.get_outputs_for.assert_called_with(
+            l2[0].get_outputs_for.return_value +
+            l2[1].get_outputs_for.return_value,
+            kwarg=kwarg)
+        l2[0].get_outputs_for.assert_called_with(
+            (input_expr, ), kwarg=kwarg)
+        l2[1].get_outputs_for.assert_called_with(
+            (l1[1].input_var, ), kwarg=kwarg)
         # l1[0].input_var should not have been accessed
         assert p.call_count == 0
 
@@ -430,7 +434,8 @@ class TestGetOutput_MergeLayer:
         from lasagne.layers.input import InputLayer
         from lasagne.layers.base import Layer
         s1 = (None, 20)
-        s2 = Mock(InputLayer((None,)), output_shapes=((None,),), input_layers=())
+        s2 = Mock(InputLayer((None,)), output_shapes=((None,),),
+                  input_layers=())
         return Layer((s1, s2), max_inputs=2)
 
     def test_layer_from_shape_invalid_get_output(self, layer_from_shape,
@@ -466,7 +471,8 @@ class TestGetOutputShape_InputLayer:
         from lasagne.layers.input import InputLayer
         return InputLayer((3, 2))
 
-    def test_get_output_shape_without_arguments(self, layer, get_output_shapes):
+    def test_get_output_shape_without_arguments(self, layer,
+                                                get_output_shapes):
         assert get_output_shapes(layer) == ((3, 2), )
 
     def test_get_output_shape_input_is_tuple(self, layer, get_output_shapes):
@@ -490,7 +496,8 @@ class TestGetOutputShape_Layer:
         from lasagne.layers.base import Layer
         from lasagne.layers.input import InputLayer
         # create a mock that has the same attributes as an InputLayer instance
-        l1 = Mock(InputLayer((None,)), output_shapes=((None,),), input_layers=())
+        l1 = Mock(InputLayer((None,)), output_shapes=((None,),),
+                  input_layers=())
         l1.get_output_shapes_for.return_value = (Mock(),)
         # create a mock that has the same attributes as a Layer instance
         l2 = Mock(Layer(l1), output_shapes=((None,),), input_layers=(l1,))
@@ -529,8 +536,8 @@ class TestGetOutputShape_Layer:
         input_shapes = {l3: ((4, 5, 6), )}
         # expected: input_shapes[l3]
         assert get_output_shapes(l3, input_shapes) is input_shapes[l3]
-        # l3.get_output_shapes_for, l2.get_output_shapes_for should not have been
-        # called
+        # l3.get_output_shapes_for, l2.get_output_shapes_for
+        # should not have been called
         assert l3.get_output_shapes_for.call_count == 0
         assert l2.get_output_shapes_for.call_count == 0
 
@@ -540,8 +547,8 @@ class TestGetOutputShape_Layer:
         output_shape = get_output_shapes(l3, {})
         # expected: l3.output_shape
         assert output_shape == l3.output_shapes
-        # l3.get_output_shapes_for, l2.get_output_shapes_for should not have been
-        # called
+        # l3.get_output_shapes_for, l2.get_output_shapes_for should
+        # not have been called
         assert l3.get_output_shapes_for.call_count == 0
         assert l2.get_output_shapes_for.call_count == 0
 
@@ -596,13 +603,17 @@ class TestGetOutputShape_MergeLayer:
         from lasagne.layers.base import Layer
         from lasagne.layers.input import InputLayer
         # create two mocks of the same attributes as an InputLayer instance
-        l1 = (Mock(InputLayer((None,)), output_shapes=((None,),), shape=((None,),), input_layers=()),
-              Mock(InputLayer((None,)), output_shapes=((None,),), shape=((None,),), input_layers=()))
+        l1 = (Mock(InputLayer((None,)), output_shapes=((None,),),
+                   shape=((None,),), input_layers=()),
+              Mock(InputLayer((None,)), output_shapes=((None,),),
+                   shape=((None,),), input_layers=()))
         l1[0].get_output_shapes_for.return_value = (Mock(),)
         l1[1].get_output_shapes_for.return_value = (Mock(),)
         # create two mocks of the same attributes as a Layer instance
-        l2 = (Mock(Layer(l1[0]), output_shapes=((None,),), input_layers=(l1[0],)),
-              Mock(Layer(l1[1]), output_shapes=((None,),), input_layers=(l1[1],)))
+        l2 = (Mock(Layer(l1[0]), output_shapes=((None,),),
+                   input_layers=(l1[0],)),
+              Mock(Layer(l1[1]), output_shapes=((None,),),
+                   input_layers=(l1[1],)))
         l2[0].get_output_shapes_for.return_value = (Mock(),)
         l2[1].get_output_shapes_for.return_value = (Mock(),)
         # create a mock that has the same attributes as a MergeLayer
@@ -684,7 +695,8 @@ class TestGetOutputShape_MergeLayer:
         #     [l2[0].get_output_shapes_for(shp),
         #      l2[1].get_output_shapes_for(l1[1].shape)])
         assert output is l3.get_output_shapes_for.return_value
-        args = l2[0].get_output_shapes_for.return_value + l2[1].get_output_shapes_for.return_value
+        args = l2[0].get_output_shapes_for.return_value + \
+            l2[1].get_output_shapes_for.return_value
         l3.get_output_shapes_for.assert_called_with((args,))
         l2[0].get_output_shapes_for.assert_called_with((shp,))
         l2[1].get_output_shapes_for.assert_called_with((l1[1].shape,))
