@@ -138,7 +138,7 @@ class TestGaussianNoiseLayer:
         input = theano.shared(numpy.ones((3, 3)))
         result = layer.get_output_for(input, deterministic=True)
         result_eval = result.eval()
-        assert (result_eval == input.eval()).all()
+        assert np.equal(result_eval, input.eval()).all()
 
     def test_specified_rng(self, input_layer):
         from lasagne.layers.noise import GaussianNoiseLayer

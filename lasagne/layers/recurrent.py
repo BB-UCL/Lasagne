@@ -62,7 +62,7 @@ import theano
 import theano.tensor as T
 from .. import nonlinearities
 from .. import init
-from ..utils import unroll_scan
+from ..utils import unroll_scan, SCOPE_DELIMITER
 
 from .base import Layer
 from .input import InputLayer
@@ -169,7 +169,8 @@ class CustomRecurrentLayer(Layer):
     ...     lasagne.layers.InputLayer((None, n_in)), n_hid)
     >>> l_hid_hid = lasagne.layers.DenseLayer(
     ...     lasagne.layers.InputLayer((None, n_hid)), n_hid)
-    >>> l_rec = lasagne.layers.CustomRecurrentLayer(l_in, l_in_hid, l_hid_hid)
+    >>> l_rec = lasagne.layers.recurrent.CustomRecurrentLayer(
+    ...     l_in, l_in_hid, l_hid_hid)
 
     The CustomRecurrentLayer can also support "convolutional recurrence", as is
     demonstrated below.
@@ -185,7 +186,7 @@ class CustomRecurrentLayer(Layer):
     >>> l_hid_to_hid = lasagne.layers.Conv2DLayer(
     ...     lasagne.layers.InputLayer(l_in_to_hid.output_shape),
     ...     n_out_filters, filter_shape, pad='same')
-    >>> l_rec = lasagne.layers.CustomRecurrentLayer(
+    >>> l_rec = lasagne.layers.recurrent.CustomRecurrentLayer(
     ...     l_in, l_in_to_hid, l_hid_to_hid)
 
     References
@@ -599,7 +600,7 @@ class RecurrentLayer(CustomRecurrentLayer):
             input_shape = incoming.output_shape
         # Retrieve the supplied name, if it exists; otherwise use ''
         if 'name' in kwargs:
-            basename = kwargs['name'] + '.'
+            basename = kwargs['name'] + SCOPE_DELIMITER
             # Create a separate version of kwargs for the contained layers
             # which does not include 'name'
             layer_kwargs = dict((key, arg) for key, arg in kwargs.items()

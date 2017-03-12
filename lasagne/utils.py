@@ -1,7 +1,10 @@
 import numpy as np
 
 import theano
-import theano.tensor as T
+from theano import tensor as T, printing
+
+
+SCOPE_DELIMITER = "::"
 
 
 def floatX(arr):
@@ -490,3 +493,24 @@ def shape_to_tuple(shape):
         return shape,
     else:
         return shape
+
+
+def extract_clean_dims(shape):
+    return tuple(s for s in shape if s is not None)
+
+
+def broadcast_to_none(shape):
+    pattern = ()
+    c = 0
+    for s in shape:
+        if s is None:
+            pattern += ("x",)
+        else:
+            pattern += (c,)
+            c += 1
+    return pattern
+
+
+def print_shape(var, msg):
+    op = printing.Print(msg)(var.shape)
+    return var + T.constant(0) * T.cast(op[0], dtype=var.dtype)

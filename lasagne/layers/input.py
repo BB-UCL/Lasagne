@@ -64,13 +64,8 @@ class InputLayer(Layer):
             if input_var.ndim != ndim:
                 raise ValueError("shape has %d dimensions, but variable has "
                                  "%d" % (ndim, input_var.ndim))
-        self.input_layers = ()
-        self.max_inputs = 1
-        self.num_outputs = 1
-        self.inner_layers = ()
         self.input_var = input_var
-        self.name = name
-        self.params = OrderedDict()
+        super(InputLayer, self).__init__((), max_inputs=0, name=name, **kwargs)
 
     @Layer.output_shapes.getter
     def output_shapes(self):

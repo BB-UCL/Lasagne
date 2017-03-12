@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 import theano
 import lasagne
+import lasagne.utils as utils
 
 
 class TestDenseLayer:
@@ -132,8 +133,8 @@ class TestDenseLayer:
             name="foo"
             )
 
-        assert layer.W.name == "foo.W"
-        assert layer.b.name == "foo.b"
+        assert layer.W.name == "foo" + utils.SCOPE_DELIMITER + "W"
+        assert layer.b.name == "foo" + utils.SCOPE_DELIMITER + "b"
 
 
 class TestNINLayer:
@@ -259,8 +260,8 @@ class TestNINLayer:
             name="foo"
             )
 
-        assert layer.W.name == "foo.W"
-        assert layer.b.name == "foo.b"
+        assert layer.W.name == "foo" + utils.SCOPE_DELIMITER + "W"
+        assert layer.b.name == "foo" + utils.SCOPE_DELIMITER + "b"
 
 
 class TestNINLayer_c01b:

@@ -1,8 +1,9 @@
 import pytest
 
-from lasagne.layers import RecurrentLayer, LSTMLayer, CustomRecurrentLayer
-from lasagne.layers import InputLayer, DenseLayer, GRULayer, Gate, Layer
+from lasagne.layers.recurrent import *
+from lasagne.layers import InputLayer, DenseLayer, Layer
 from lasagne.layers import helper
+import lasagne.utils as utils
 import theano
 import theano.tensor as T
 import numpy as np
@@ -153,17 +154,23 @@ def test_recurrent_hid_init_layer_eval():
 
 def test_recurrent_incoming_tuple():
     input_shape = (2, 3, 4)
-    l_rec = lasagne.layers.RecurrentLayer(input_shape, 5)
+    l_rec = RecurrentLayer(input_shape, 5)
     assert l_rec.input_shapes[0] == input_shape
 
 
 def test_recurrent_name():
     l_in = lasagne.layers.InputLayer((2, 3, 4))
     layer_name = 'l_rec'
-    l_rec = lasagne.layers.RecurrentLayer(l_in, 4, name=layer_name)
-    assert l_rec.b.name == layer_name + '.input_to_hidden.b'
-    assert l_rec.W_in_to_hid.name == layer_name + '.input_to_hidden.W'
-    assert l_rec.W_hid_to_hid.name == layer_name + '.hidden_to_hidden.W'
+    l_rec = RecurrentLayer(l_in, 4, name=layer_name)
+    assert l_rec.b.name == layer_name + \
+        utils.SCOPE_DELIMITER + "input_to_hidden" +\
+        utils.SCOPE_DELIMITER + "b"
+    assert l_rec.W_in_to_hid.name == layer_name + \
+        utils.SCOPE_DELIMITER + "input_to_hidden" +\
+        utils.SCOPE_DELIMITER + "W"
+    assert l_rec.W_hid_to_hid.name == layer_name + \
+        utils.SCOPE_DELIMITER + "hidden_to_hidden" +\
+        utils.SCOPE_DELIMITER + "W"
 
 
 def test_custom_recurrent_arbitrary_shape():
@@ -179,7 +186,7 @@ def test_custom_recurrent_arbitrary_shape():
     l_hid_to_hid = lasagne.layers.Conv2DLayer(
         lasagne.layers.InputLayer((None, n_out_filters, width, height)),
         n_out_filters, filter_shape, pad='same')
-    l_rec = lasagne.layers.CustomRecurrentLayer(
+    l_rec = CustomRecurrentLayer(
         l_in, l_in_to_hid, l_hid_to_hid)
     assert l_rec.output_shape == (n_batch, n_steps, n_out_filters, width,
                                   height)
@@ -220,7 +227,7 @@ def test_custom_recurrent_arbitrary_depth():
     l_hid_to_hid = lasagne.layers.Conv2DLayer(
         l_hid_to_hid, n_out_filters, filter_shape, pad='same')
 
-    l_rec = lasagne.layers.CustomRecurrentLayer(
+    l_rec = CustomRecurrentLayer(
         l_in, l_in_to_hid, l_hid_to_hid)
 
     assert l_rec.output_shape == (n_batch, n_steps, n_out_filters, width,
@@ -297,18 +304,18 @@ def test_custom_recurrent_non_unique_inputs():
 
     # Ensure that trying to use either 'bad' graph raises ValueError
     with pytest.raises(ValueError):
-        l_rec = lasagne.layers.CustomRecurrentLayer(
+        l_rec = CustomRecurrentLayer(
             l_in, l_in_to_hid_bad, l_hid_to_hid)
 
     with pytest.raises(ValueError):
-        l_rec = lasagne.layers.CustomRecurrentLayer(
+        l_rec = CustomRecurrentLayer(
             l_in, l_in_to_hid, l_hid_to_hid_bad)
 
     with pytest.raises(ValueError):
-        l_rec = lasagne.layers.CustomRecurrentLayer(
+        l_rec = CustomRecurrentLayer(
             l_in, l_in_to_hid_bad, l_hid_to_hid_bad)
 
-    l_rec = lasagne.layers.CustomRecurrentLayer(
+    l_rec = CustomRecurrentLayer(
         l_in, l_in_to_hid, l_hid_to_hid)
 
 
@@ -329,7 +336,7 @@ def test_custom_recurrent_init_shape_error():
         lasagne.layers.InputLayer((n_batch, n_channels, width, height)),
         n_out_filters, filter_shape, pad='same')
     with pytest.raises(ValueError):
-        l_rec = lasagne.layers.CustomRecurrentLayer(
+        l_rec = CustomRecurrentLayer(
             l_in, l_in_to_hid, l_hid_to_hid, precompute_input=True)
 
     # When precompute_input = False, input_to_hidden.shape[1] must be None
@@ -338,7 +345,7 @@ def test_custom_recurrent_init_shape_error():
         lasagne.layers.InputLayer((n_batch + 1, n_channels, width, height)),
         n_out_filters, filter_shape, pad='same')
     with pytest.raises(ValueError):
-        l_rec = lasagne.layers.CustomRecurrentLayer(
+        l_rec = CustomRecurrentLayer(
             l_in, l_in_to_hid, l_hid_to_hid, precompute_input=False)
 
     # In any case, input_to_hidden and hidden_to_hidden's output shapes after
@@ -347,7 +354,7 @@ def test_custom_recurrent_init_shape_error():
         lasagne.layers.InputLayer((None, n_channels, width + 1, height)),
         n_out_filters, filter_shape, pad='same')
     with pytest.raises(ValueError):
-        l_rec = lasagne.layers.CustomRecurrentLayer(
+        l_rec = CustomRecurrentLayer(
             l_in, l_in_to_hid, l_hid_to_hid)
 
     # And, the output shape of input_to_hidden must match the input shape
@@ -361,7 +368,7 @@ def test_custom_recurrent_init_shape_error():
         lasagne.layers.InputLayer((n_batch, n_out_filters, width, height)),
         n_out_filters, filter_shape)
     with pytest.raises(ValueError):
-        l_rec = lasagne.layers.CustomRecurrentLayer(
+        l_rec = CustomRecurrentLayer(
             l_in, l_in_to_hid, l_hid_to_hid)
 
 
@@ -1212,7 +1219,7 @@ def test_CustomRecurrentLayer_child_kwargs():
     hid_to_hid.get_outputs_for.return_value = (T.matrix(),)
     hid_to_hid.get_params.return_value = []
     # Construct a CustomRecurrentLayer using these Mocks
-    l_rec = lasagne.layers.CustomRecurrentLayer(
+    l_rec = CustomRecurrentLayer(
         InputLayer(in_shape), in_to_hid, hid_to_hid)
     # Call get_output with a kwarg, should be passd to in_to_hid and hid_to_hid
     helper.get_output(l_rec, foo='bar')

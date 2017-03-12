@@ -295,7 +295,9 @@ def test_batch_norm_macro(dnn):
     obj = object()
 
     # check if it steals the nonlinearity
-    layer = Mock(Layer, output_shapes=(input_shape, ), nonlinearity=obj)
+    layer = Mock(Layer, output_shapes=(input_shape, ),
+                 nonlinearity=obj)
+    layer.name = None
     bnstack = batch_norm(layer)
     assert isinstance(bnstack, NonlinearityLayer)
     assert isinstance(bnstack.input_layers[0], BatchNormLayer)
@@ -305,6 +307,7 @@ def test_batch_norm_macro(dnn):
     # check if it removes the bias
     layer = Mock(Layer, output_shapes=(input_shape, ),
                  b=obj, params={obj: set()})
+    layer.name = None
     bnstack = batch_norm(layer)
     assert isinstance(bnstack, BatchNormLayer)
     assert layer.b is None
@@ -313,6 +316,7 @@ def test_batch_norm_macro(dnn):
     # check if it can handle an unset bias
     layer = Mock(Layer, output_shapes=(input_shape, ),
                  b=None, params={obj: set()})
+    layer.name = None
     bnstack = batch_norm(layer)
     assert isinstance(bnstack, BatchNormLayer)
     assert layer.b is None
@@ -343,8 +347,9 @@ def test_batch_norm_macro(dnn):
 
     # check if created layers remain unnamed if no names are given
     layer = Mock(Layer, output_shapes=(input_shape, ), nonlinearity=obj)
+    layer.name = None
     bnstack = batch_norm(layer)
     assert isinstance(bnstack, NonlinearityLayer)
     assert isinstance(bnstack.input_layers[0], BatchNormLayer)
-    assert bnstack.name is None
-    assert bnstack.input_layers[0].name is None
+    assert bnstack.name is ""
+    assert bnstack.input_layers[0].name is ""

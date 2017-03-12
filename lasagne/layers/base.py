@@ -3,9 +3,12 @@ from collections import OrderedDict
 import theano.tensor as T
 
 from .. import utils
+from ..utils import SCOPE_DELIMITER
+
 
 __all__ = [
-    "Layer"
+    "Layer",
+    "IndexLayer"
 ]
 
 
@@ -31,11 +34,13 @@ class Layer(object):
         An optional name to attach to this layer.
     """
     def __init__(self, incoming, max_inputs=1, num_outputs=1,
-                 inner_layers=(), name=None):
+                 inner_layers=None, name=None, prefix=None, **kwargs):
         if isinstance(incoming, (list, tuple)):
             if all(isinstance(i, int) or i is None for i in incoming):
-                # Single shape
-                incoming = (incoming,)
+                if len(incoming) > 0:
+                    # Single shape
+                    incoming = (incoming,)
+                # Empty means input layer
         else:
             # Single layer
             incoming = (incoming,)
@@ -61,15 +66,17 @@ class Layer(object):
 
         self.max_inputs = max_inputs
         self.num_outputs = num_outputs
-        self.inner_layers = inner_layers
-        self.name = name
+        self.inner_layers = dict() if inner_layers is None else inner_layers
+        self._name = name
+        self._prefix = prefix
         self.params = OrderedDict()
         self.get_outputs_kwargs = []
         for shape in self.input_shapes:
             if any(d is not None and d <= 0 for d in shape):
                 raise ValueError(("Cannot create Layer with a non-positive "
                                   "input_shape dimension. input_shape=%r, "
-                                  "self.name=%r") % (shape, self.name))
+                                  "self.name=%r") % (shape, self._name))
+        self.name = name
 
     @property
     def input_shape(self):
@@ -159,7 +166,7 @@ class Layer(object):
         if unwrap_shared:
             result = utils.collect_shared_vars(result)
         # Add all of the inner layers parameters
-        for l in self.inner_layers:
+        for l in self.inner_layers.values():
             result += l.get_params(unwrap_shared=unwrap_shared, **tags)
         return result
 
@@ -282,12 +289,14 @@ class Layer(object):
         It is recommended to assign the resulting parameter variable/expression
         to an attribute of the layer for easy access, for example:
 
-        >>> self.W = self.add_param(W, (2, 3), name='W')  #doctest: +SKIP
+        >>> self.w = self.add_param(w, (2, 3), name='W')  #doctest: +SKIP
         """
         # prefix the param name with the layer name if it exists
+        if name is None:
+            name = str(len(self.params))
         if name is not None:
-            if self.name is not None:
-                name = "%s.%s" % (self.name, name)
+            if self._name is not None:
+                name = "%s%s%s" % (self.name, SCOPE_DELIMITER, name)
         # create shared variable, or pass through given variable/expression
         param = utils.create_param(spec, shape, name)
         # parameters should be trainable and regularizable by default
@@ -296,3 +305,55 @@ class Layer(object):
         self.params[param] = set(tag for tag, value in tags.items() if value)
 
         return param
+
+    @property
+    def name(self):
+        name = "" if self._prefix is None else \
+            self._prefix + SCOPE_DELIMITER
+        name += "" if self._name is None else self._name
+        return name
+
+    @name.setter
+    def name(self, value):
+        self._name = value
+        if self._prefix is None:
+            prefix = "" if self._name is None else self.name
+        elif self._name is None:
+            prefix = self._prefix
+        else:
+            prefix = self._prefix + SCOPE_DELIMITER + self._name
+        for l in self.inner_layers.values():
+            l.prefix = prefix
+        for p in self.params:
+            base = p.name.split(SCOPE_DELIMITER)[-1]
+            p.name = prefix + SCOPE_DELIMITER + base
+
+    @property
+    def prefix(self):
+        return self._prefix
+
+    @prefix.setter
+    def prefix(self, value):
+        self._prefix = value
+        self.name = self._name
+
+
+class IndexLayer(Layer):
+    def __init__(self, incoming, indexes, including=True, **kwargs):
+        super(IndexLayer, self).__init__(incoming, max_inputs=100, **kwargs)
+        if not isinstance(indexes, (list, tuple)):
+            indexes = (indexes, )
+        if len(indexes) > len(self.input_shapes):
+            raise ValueError("Filtering {} indexes, but have {} inputs"
+                             .format(len(indexes), len(self.input_shapes)))
+        if including:
+            self.indexes = indexes
+        else:
+            self.indexes = tuple(i for i in range(len(self.input_shapes))
+                                 if i not in indexes)
+
+    def get_output_shapes_for(self, input_shapes):
+        return tuple(input_shapes[i] for i in self.indexes)
+
+    def get_outputs_for(self, inputs, **kwargs):
+        return tuple(inputs[i] for i in self.indexes)

@@ -2,6 +2,7 @@ from mock import Mock
 import numpy
 import pytest
 import theano
+import lasagne.utils as utils
 
 
 class TestLayer:
@@ -104,7 +105,7 @@ class TestLayer:
         a_shape = (20, 50)
         a = numpy.random.normal(0, 1, a_shape)
         A = named_layer.add_param(a, a_shape, name='A')
-        assert A.name == 'layer_name.A'
+        assert A.name == "layer_name" + utils.SCOPE_DELIMITER + "A"
 
     def test_get_output_for_notimplemented(self, layer):
         with pytest.raises(NotImplementedError):
