@@ -269,6 +269,27 @@ def elu(x):
     return theano.tensor.switch(x > 0, x, theano.tensor.exp(x) - 1)
 
 
+# leaky rectify
+class LeakyElu(object):
+    """Leaky ELU
+    """
+    def __init__(self, leakiness=1.0, free=True):
+        if free:
+            self.leakiness = leakiness
+        else:
+            self.leakiness = softplus(leakiness)
+
+    def __call__(self, x):
+        return theano.tensor.switch(x > 0, x, self.leakiness*(theano.tensor.exp(x) - 1))
+
+
+leaky_elu = LeakyElu()  # shortcut with default leaky elu
+leaky_elu.__doc__ = """leaky_elu(x)
+
+    Instance of :class:`LeakyElu` with leakiness :math:`\\alpha=1.0`
+    """
+
+
 # softplus
 def softplus(x):
     """Softplus activation function :math:`\\varphi(x) = \\log(1 + e^x)`
