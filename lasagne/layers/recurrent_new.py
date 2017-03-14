@@ -408,7 +408,7 @@ class RNNLayer(RecurrenceLayer):
         if step_layer.pre_compute_input or not step_layer.combine_h_x:
             # Dense Wx layer
             l_in = DenseLayer(incoming=l_in,
-                              W=W, b=b,
+                              W=W, b=None if step_layer.no_bias else b,
                               num_units=step_layer.num_x_to_h,
                               nonlinearity=nonlinearities.identity,
                               name="in_to_hid")
@@ -432,7 +432,7 @@ class RNNLayer(RecurrenceLayer):
 class AbstractStepLayer(Layer):
     """
     lasagne.layers.recurrent.AbstractStepLayer(incoming, num_units,
-    pre_compute_input=True, combine_h_x=False, learn_init=False,
+    pre_compute_input=True, combine_h_x=False, learn_init=True,
     grad_clipping=0, post_filter=None, **kwargs):
 
     A layer for abstracting only the step function in recurrent layers.
@@ -472,13 +472,15 @@ class AbstractStepLayer(Layer):
                  num_x_to_h,
                  pre_compute_input=True,
                  combine_h_x=False,
-                 learn_init=False,
+                 no_bias=False,
+                 learn_init=True,
                  post_indexes=None,
                  **kwargs):
         super(AbstractStepLayer, self).__init__(incoming, **kwargs)
         self.num_x_to_h = num_x_to_h
         self.pre_compute_input = pre_compute_input
         self.combine_h_x = combine_h_x
+        self.no_bias = no_bias
         self.learn_init = learn_init
         self.post_indexes = post_indexes
         self.init = []
@@ -840,6 +842,8 @@ class RWAStep(AbstractStepLayer):
     A Recurrence Weighted Average step layer
     .. math ::
 
+    Source: https://arxiv.org/abs/1703.01253
+
     Parameters
     ----------
     incoming : a tuple of either :class:`lasagne.layers.Layer`
@@ -926,3 +930,4 @@ class RWAStep(AbstractStepLayer):
         dt = dt * T.exp(- m) + T.exp(a - m)
         h = self.f(nt / dt)
         return h, nt, dt
+

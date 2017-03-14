@@ -55,7 +55,7 @@ class EmbeddingLayer(Layer):
     """
     def __init__(self, incoming, input_size, output_size,
                  W=init.Normal(), **kwargs):
-        super(EmbeddingLayer, self).__init__(incoming, **kwargs)
+        super(EmbeddingLayer, self).__init__(incoming, max_inputs=100, **kwargs)
 
         self.input_size = input_size
         self.output_size = output_size
@@ -63,9 +63,7 @@ class EmbeddingLayer(Layer):
         self.W = self.add_param(W, (input_size, output_size), name="W")
 
     def get_output_shapes_for(self, input_shapes):
-        input_shape = input_shapes[0]
-        print(input_shapes, self.output_size)
-        return input_shape + (self.output_size, ),
+        return tuple(s + (self.output_size, ) for s in input_shapes)
 
     def get_outputs_for(self, inputs, **kwargs):
-        return self.W[inputs[0]],
+        return tuple(self.W[i] for i in inputs)
