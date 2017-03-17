@@ -280,7 +280,8 @@ class LeakyElu(object):
             self.leakiness = softplus(leakiness)
 
     def __call__(self, x):
-        return theano.tensor.switch(x > 0, x, self.leakiness*(theano.tensor.exp(x) - 1))
+        return theano.tensor.switch(
+            x > 0, x, self.leakiness*(theano.tensor.exp(x) - 1))
 
 
 leaky_elu = LeakyElu()  # shortcut with default leaky elu

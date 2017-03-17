@@ -81,8 +81,9 @@ class RecurrenceLayer(Layer):
     """
     lasagne.layers.recurrent.RecurrenceLayer(incoming, step_layer,
     in_to_hid=None, hid_to_out=None, mask_input=None, pre_compute_input=True,
-    in_order="TND", out_order="TND", backwards=False, gradient_steps=-1,
-    only_return_final=False, unroll_scan=False, **kwargs)
+    pass_raw_and_computed=False, in_order="TND", out_order="TND",
+    backwards=False, gradient_steps=-1, only_return_final=False,
+    unroll_scan=False, **kwargs)
 
     A layer which applies the function defined by the step_layer in a loop
     over the inputs.
@@ -127,6 +128,10 @@ class RecurrenceLayer(Layer):
         the sequence. This can result in a speedup at the expense of
         an increase in memory usage.
 
+    pass_raw_and_computed: bool
+        If True will pass to the raw input and the computed one from the
+        `in_to_hid`, otherwise only the computed one.
+
     in_order : "TND" or "NTD"
         Defines what is the ordering of the inputs. Note that if there are
         several inputs all must be in the same order.
@@ -166,6 +171,7 @@ class RecurrenceLayer(Layer):
                  hid_to_out=None,
                  mask_input=None,
                  pre_compute_input=True,
+                 pass_raw_and_computed=False,
                  in_order="TND",
                  out_order="TND",
                  backwards=False,
@@ -189,6 +195,7 @@ class RecurrenceLayer(Layer):
             inner["hid_to_out"] = hid_to_out
         self.mask = mask_input is not None
         self.pre_compute_input = pre_compute_input
+        self.pass_raw_and_computed = pass_raw_and_computed
         self.in_order = in_order
         self.out_order = out_order
         self.backwards = backwards
@@ -230,6 +237,7 @@ class RecurrenceLayer(Layer):
             inputs = tuple(i.dimshuffle(*((1, 0) + tuple(range(2, i.ndim))))
                            for i in inputs)
 
+        raw_inputs = inputs
         if self.pre_compute_input:
             layer = self.inner_layers["in_to_hid"]
             t_ns = tuple((i.shape[0], i.shape[1]) for i in inputs)
@@ -242,6 +250,8 @@ class RecurrenceLayer(Layer):
             inputs = tuple(T.reshape(i, (t1, t2, -1))
                            for i, (t1, t2) in zip(inputs, t_ns))
 
+        if self.pass_raw_and_computed:
+            inputs = raw_inputs + inputs
         ns = tuple(i.shape[1] for i in inputs)
         step_l = self.inner_layers["step"]
 
@@ -250,13 +260,16 @@ class RecurrenceLayer(Layer):
                 return step_l.get_outputs_for(args, **kwargs)
             else:
                 n = len(self.input_shapes)
+                raw_inputs = args[:n] if self.pass_raw_and_computed else ()
+                s1n = n if self.pass_raw_and_computed else 0
+                s2n = 2*n if self.pass_raw_and_computed else n
                 layer = self.inner_layers["in_to_hid"]
                 input_layers = (l for l in helper.get_all_layers(layer)
                                 if isinstance(l, InputLayer))
                 inputs = helper.get_outputs(layer, dict(zip(input_layers,
-                                                            args[:n])))
-                return step_l.get_outputs_for(inputs + args[n:], **kwargs)
-
+                                                            args[s1n:s2n])))
+                args = raw_inputs + inputs + args[s2n:]
+                return step_l.get_outputs_for(args, **kwargs)
         if self.unroll_scan:
             if self.gradient_steps != -1:
                 raise ValueError("unroll_scan does not support "
@@ -426,6 +439,7 @@ class RNNLayer(RecurrenceLayer):
                       in_to_hid=l_in, hid_to_out=l_out,
                       in_order=in_order, out_order=out_order,
                       pre_compute_input=step_layer.pre_compute_input,
+                      pass_raw_and_computed=step_layer.pass_raw_and_computed,
                       **kwargs)
 
 
@@ -471,6 +485,7 @@ class AbstractStepLayer(Layer):
                  incoming,
                  num_x_to_h,
                  pre_compute_input=True,
+                 pass_raw_and_computed=False,
                  combine_h_x=False,
                  no_bias=False,
                  learn_init=True,
@@ -479,6 +494,7 @@ class AbstractStepLayer(Layer):
         super(AbstractStepLayer, self).__init__(incoming, **kwargs)
         self.num_x_to_h = num_x_to_h
         self.pre_compute_input = pre_compute_input
+        self.pass_raw_and_computed = pass_raw_and_computed
         self.combine_h_x = combine_h_x
         self.no_bias = no_bias
         self.learn_init = learn_init
@@ -930,4 +946,3 @@ class RWAStep(AbstractStepLayer):
         dt = dt * T.exp(- m) + T.exp(a - m)
         h = self.f(nt / dt)
         return h, nt, dt
-

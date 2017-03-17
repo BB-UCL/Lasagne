@@ -56,15 +56,17 @@ class EmbeddingLayer(Layer):
     def __init__(self, incoming, input_size, output_size,
                  zero_out=0,
                  W=init.Normal(), **kwargs):
-        super(EmbeddingLayer, self).__init__(incoming, max_inputs=100, **kwargs)
+        super(EmbeddingLayer, self).__init__(incoming, max_inputs=10, **kwargs)
 
         self.input_size = input_size
         self.output_size = output_size
         self.zero_out = zero_out
         if output_size == 1:
-            self.W = self.add_param(W, (input_size - zero_out, ), name="W")
+            self.W = self.add_param(W, (input_size - zero_out, ),
+                                    name="W")
         else:
-            self.W = self.add_param(W, (input_size - zero_out, output_size), name="W")
+            self.W = self.add_param(W, (input_size - zero_out, output_size),
+                                    name="W")
 
     def get_output_shapes_for(self, input_shapes):
         return tuple(s + (self.output_size, ) for s in input_shapes)
@@ -75,5 +77,6 @@ class EmbeddingLayer(Layer):
         elif self.output_size == 1:
             W = T.concatenate((T.zeros((self.zero_out, )), self.W), axis=0)
         else:
-            W = T.concatenate((T.zeros((self.zero_out, self.output_size)), self.W), axis=0)
+            W = T.concatenate((T.zeros((self.zero_out, self.output_size)),
+                               self.W), axis=0)
         return tuple(W[i] for i in inputs)
