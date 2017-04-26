@@ -81,7 +81,8 @@ __all__ = [
     "adam",
     "adamax",
     "norm_constraint",
-    "total_norm_constraint"
+    "total_norm_constraint",
+    "apply_learning_rate_decay"
 ]
 
 
@@ -833,3 +834,26 @@ def total_norm_constraint(tensor_vars, max_norm, epsilon=1e-7,
         return tensor_vars_scaled, norm
     else:
         return tensor_vars_scaled
+
+
+def apply_learning_rate_decay(updates, learning_rate, period=0, factor=0.5):
+    if period > 0:
+        count = theano.shared(1, "decay_count")
+        one = T.constant(1, dtype=count.dtype)
+        cond = T.ge(count, period)
+        updates[count] = ifelse(cond, one, count + one)
+        updates[learning_rate] = ifelse(cond,
+                                        learning_rate * factor,
+                                        learning_rate)
+
+    return updates
+
+def wrap_with_lr_decay(updates_fn, period=0, factor=0.5):
+    def get_updates(loss_or_grads, params, learning_rate, **kwargs):
+        learning_rate = theano.shared(
+            utils.floatX(learning_rate), "learning_rate")
+        updates = updates_fn(loss_or_grads, params, learning_rate, **kwargs)
+        updates = apply_learning_rate_decay(updates, learning_rate, 
+                                            period, factor)
+        return updates
+    return get_updates
