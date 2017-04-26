@@ -66,6 +66,7 @@ import numpy as np
 
 import theano
 import theano.tensor as T
+from theano.ifelse import ifelse
 from . import utils
 
 __all__ = [
@@ -201,7 +202,7 @@ def apply_momentum(updates, params=None, momentum=0.9):
     return updates
 
 
-def momentum(loss_or_grads, params, learning_rate, momentum=0.9):
+def momentum(loss_or_grads, params, learning_rate, momentum=0.9, burnout=0):
     """Stochastic Gradient Descent (SGD) updates with momentum
 
     Generates update expressions of the form:
@@ -220,6 +221,8 @@ def momentum(loss_or_grads, params, learning_rate, momentum=0.9):
     momentum : float or symbolic scalar, optional
         The amount of momentum to apply. Higher momentum results in
         smoothing over more update steps. Defaults to 0.9.
+    burnout: int 
+        The number of iterations for which initially to run SGD without momentum.
 
     Returns
     -------
@@ -237,7 +240,18 @@ def momentum(loss_or_grads, params, learning_rate, momentum=0.9):
     nesterov_momentum : Nesterov's variant of SGD with momentum
     """
     updates = sgd(loss_or_grads, params, learning_rate)
-    return apply_momentum(updates, momentum=momentum)
+    mom_updates = apply_momentum(updates, momentum=momentum)
+    if burnout > 0:
+        t = theano.shared(utils.floatX(0.), name="momentum_t")
+        cond = T.ge(t, burnout)
+        sgd_vals = [v for _, v in updates.items()]
+        mom_vals = [mom_updates[k] for k, _ in updates.items()]
+        vals = ifelse(cond, mom_vals, sgd_vals)
+        updates = OrderedDict([k, v] for (k, _), v in updates.items().zip(vals))
+        updates[t] = t + T.constant(1)
+        return updates
+    else:
+        return mom_updates
 
 
 def apply_nesterov_momentum(updates, params=None, momentum=0.9):
