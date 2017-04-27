@@ -61,6 +61,7 @@ Examples
 """
 
 from collections import OrderedDict
+from functools import wraps
 
 import numpy as np
 
@@ -82,8 +83,40 @@ __all__ = [
     "adamax",
     "norm_constraint",
     "total_norm_constraint",
-    "apply_learning_rate_decay"
+    "apply_learning_rate_decay",
+    "lr_decay"
 ]
+
+
+def apply_learning_rate_decay(updates, learning_rate, period=0, factor=0.5):
+    if period > 0:
+        count = theano.shared(1, "decay_count")
+        one = T.constant(1, dtype=count.dtype)
+        cond = T.ge(count, period)
+        updates[count] = ifelse(cond, one, count + one)
+        updates[learning_rate] = ifelse(cond,
+                                        learning_rate * factor,
+                                        learning_rate)
+
+    return updates
+
+
+def lr_decay(updates_fn):
+    @wraps(updates_fn)
+    def get_updates(loss_or_grads, params, learning_rate, *args,
+                    decay_period=0, decay_factor=0.5, **kwargs):
+        if decay_period <= 0 or decay_factor == 1:
+            return updates_fn(
+                loss_or_grads, params, learning_rate, *args, **kwargs)
+
+        learning_rate = theano.shared(
+            utils.floatX(learning_rate), "learning_rate")
+        updates = updates_fn(loss_or_grads, params, learning_rate,
+                             *args, **kwargs)
+        updates = apply_learning_rate_decay(updates, learning_rate, 
+                                            decay_period, decay_factor)
+        return updates
+    return get_updates
 
 
 def get_or_compute_grads(loss_or_grads, params):
@@ -125,6 +158,7 @@ def get_or_compute_grads(loss_or_grads, params):
         return theano.grad(loss_or_grads, params)
 
 
+@lr_decay
 def sgd(loss_or_grads, params, learning_rate):
     """Stochastic Gradient Descent (SGD) updates
 
@@ -203,6 +237,7 @@ def apply_momentum(updates, params=None, momentum=0.9):
     return updates
 
 
+@lr_decay
 def momentum(loss_or_grads, params, learning_rate, momentum=0.9):
     """Stochastic Gradient Descent (SGD) updates with momentum
 
@@ -298,6 +333,7 @@ def apply_nesterov_momentum(updates, params=None, momentum=0.9):
     return updates
 
 
+@lr_decay
 def nesterov_momentum(loss_or_grads, params, learning_rate, momentum=0.9):
     """Stochastic Gradient Descent (SGD) updates with Nesterov momentum
 
@@ -342,6 +378,7 @@ def nesterov_momentum(loss_or_grads, params, learning_rate, momentum=0.9):
     return apply_nesterov_momentum(updates, momentum=momentum)
 
 
+@lr_decay
 def adagrad(loss_or_grads, params, learning_rate=1.0, epsilon=1e-6):
     """Adagrad updates
 
@@ -401,6 +438,7 @@ def adagrad(loss_or_grads, params, learning_rate=1.0, epsilon=1e-6):
     return updates
 
 
+@lr_decay
 def rmsprop(loss_or_grads, params, learning_rate=1.0, rho=0.9, epsilon=1e-6):
     """RMSProp updates
 
@@ -462,6 +500,7 @@ def rmsprop(loss_or_grads, params, learning_rate=1.0, rho=0.9, epsilon=1e-6):
     return updates
 
 
+@lr_decay
 def adadelta(loss_or_grads, params, learning_rate=1.0, rho=0.95, epsilon=1e-6):
     """ Adadelta updates
 
@@ -546,6 +585,7 @@ def adadelta(loss_or_grads, params, learning_rate=1.0, rho=0.95, epsilon=1e-6):
     return updates
 
 
+@lr_decay
 def adam(loss_or_grads, params, learning_rate=0.001, beta1=0.9,
          beta2=0.999, epsilon=1e-8):
     """Adam updates
@@ -615,6 +655,7 @@ def adam(loss_or_grads, params, learning_rate=0.001, beta1=0.9,
     return updates
 
 
+@lr_decay
 def adamax(loss_or_grads, params, learning_rate=0.002, beta1=0.9,
            beta2=0.999, epsilon=1e-8):
     """Adamax updates
@@ -823,30 +864,6 @@ def total_norm_constraint(tensor_vars, max_norm, epsilon=1e-7,
         return tensor_vars_scaled, norm
     else:
         return tensor_vars_scaled
-
-
-def apply_learning_rate_decay(updates, learning_rate, period=0, factor=0.5):
-    if period > 0:
-        count = theano.shared(1, "decay_count")
-        one = T.constant(1, dtype=count.dtype)
-        cond = T.ge(count, period)
-        updates[count] = ifelse(cond, one, count + one)
-        updates[learning_rate] = ifelse(cond,
-                                        learning_rate * factor,
-                                        learning_rate)
-
-    return updates
-
-
-def wrap_with_lr_decay(updates_fn, period=0, factor=0.5):
-    def get_updates(loss_or_grads, params, learning_rate, **kwargs):
-        learning_rate = theano.shared(
-            utils.floatX(learning_rate), "learning_rate")
-        updates = updates_fn(loss_or_grads, params, learning_rate, **kwargs)
-        updates = apply_learning_rate_decay(updates, learning_rate, 
-                                            period, factor)
-        return updates
-    return get_updates
 
 
 def apply_burnout(long_updates, initial_updates, burnout=0):
