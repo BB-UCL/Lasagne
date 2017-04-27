@@ -203,7 +203,7 @@ def apply_momentum(updates, params=None, momentum=0.9):
     return updates
 
 
-def momentum(loss_or_grads, params, learning_rate, momentum=0.9, burnout=0):
+def momentum(loss_or_grads, params, learning_rate, momentum=0.9):
     """Stochastic Gradient Descent (SGD) updates with momentum
 
     Generates update expressions of the form:
@@ -241,18 +241,7 @@ def momentum(loss_or_grads, params, learning_rate, momentum=0.9, burnout=0):
     nesterov_momentum : Nesterov's variant of SGD with momentum
     """
     updates = sgd(loss_or_grads, params, learning_rate)
-    mom_updates = apply_momentum(updates, momentum=momentum)
-    if burnout > 0:
-        t = theano.shared(utils.floatX(0.), name="momentum_t")
-        cond = T.ge(t, burnout)
-        sgd_vals = [v for _, v in updates.items()]
-        mom_vals = [mom_updates[k] for k, _ in updates.items()]
-        vals = ifelse(cond, mom_vals, sgd_vals)
-        updates = OrderedDict([k, v] for (k, _), v in updates.items().zip(vals))
-        updates[t] = t + T.constant(1)
-        return updates
-    else:
-        return mom_updates
+    return apply_momentum(updates, momentum=momentum)
 
 
 def apply_nesterov_momentum(updates, params=None, momentum=0.9):
@@ -848,6 +837,7 @@ def apply_learning_rate_decay(updates, learning_rate, period=0, factor=0.5):
 
     return updates
 
+
 def wrap_with_lr_decay(updates_fn, period=0, factor=0.5):
     def get_updates(loss_or_grads, params, learning_rate, **kwargs):
         learning_rate = theano.shared(
@@ -855,5 +845,28 @@ def wrap_with_lr_decay(updates_fn, period=0, factor=0.5):
         updates = updates_fn(loss_or_grads, params, learning_rate, **kwargs)
         updates = apply_learning_rate_decay(updates, learning_rate, 
                                             period, factor)
+        return updates
+    return get_updates
+
+
+def apply_burnout(long_updates, initial_updates, burnout=0):
+    if burnout > 0:
+        t = theano.shared(np.asarray(0, dtype="int64"), name="momentum_t")
+        cond = T.ge(t, burnout)
+        initial_values = [initial_updates.get(k, k) for k, v in long_updates.items()]
+        long_values = [v for _, v in long_updates.items()]
+        values = ifelse(cond, long_values, initial_values)
+        updates = OrderedDict([k, v] for (k, _), v in zip(long_updates.items(), values))
+        updates[t] = t + T.constant(1)
+        return updates
+    else:
+        return long_updates
+
+
+def wrap_with_burnout(updates_fn, burnout=0):
+    def get_updates(loss_or_grads, params, learning_rate, **kwargs):
+        sgd_updates = sgd(loss_or_grads, params, learning_rate)
+        updates = updates_fn(loss_or_grads, params, learning_rate, **kwargs)
+        updates = apply_burnout(updates, sgd_updates, burnout)
         return updates
     return get_updates

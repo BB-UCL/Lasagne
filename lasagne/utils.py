@@ -1,7 +1,8 @@
 import numpy as np
 
 import theano
-from theano import tensor as T, printing
+from theano import tensor as T
+from theano.printing import Print
 
 
 SCOPE_DELIMITER = "::"
@@ -511,6 +512,15 @@ def broadcast_to_none(shape):
     return pattern
 
 
-def print_shape(var, msg):
-    op = printing.Print(msg)(var.shape)
-    return var + T.constant(0) * T.cast(op[0], dtype=var.dtype)
+def theano_print_shape(var, msg):
+    pr = Print(msg)(T.shape(var))
+    return T.switch(T.lt(0, 1), var, T.cast(pr[0], var.dtype))
+
+
+def theano_print_min_max_vals(var, msg):
+    pr = Print(msg)(T.stack((T.min(var), T.max(var))))
+    return T.switch(T.lt(0, 1), var, T.cast(pr[0], var.dtype))
+
+
+def theano_print_vals(var, msg):
+    return Print(msg)(var)
