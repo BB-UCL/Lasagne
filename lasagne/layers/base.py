@@ -238,7 +238,7 @@ class Layer(object):
         inputs = utils.to_tuple(inputs)
         return self.get_outputs_for(inputs, **kwargs)[0]
 
-    def add_param(self, spec, shape, name=None, **tags):
+    def add_param(self, spec, shape, name=None, broadcast_unit_dims=True, **tags):
         """
         Register and possibly initialize a parameter tensor for the layer.
 
@@ -269,7 +269,11 @@ class Layer(object):
             layer's name if any (in the form ``'layer_name.param_name'``). If
             ``spec`` is already a shared variable or expression, this parameter
             will be ignored to avoid overwriting an existing name.
-
+        
+        broadcast_unit_dims: bool (optional)
+             When creating a shared variable whether to make it broadcastable
+            along any axis where its size is 1.
+        
         **tags (optional)
             tags associated with the parameter can be specified as keyword
             arguments. To associate the tag ``tag1`` with the parameter, pass
@@ -298,7 +302,7 @@ class Layer(object):
             if self._name is not None:
                 name = "%s%s%s" % (self.name, SCOPE_DELIMITER, name)
         # create shared variable, or pass through given variable/expression
-        param = utils.create_param(spec, shape, name)
+        param = utils.create_param(spec, shape, name, broadcast_unit_dims)
         # parameters should be trainable and regularizable by default
         tags['trainable'] = tags.get('trainable', True)
         tags['regularizable'] = tags.get('regularizable', True)

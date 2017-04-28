@@ -312,7 +312,7 @@ def compute_norms(array, norm_axes=None):
     return norms
 
 
-def create_param(spec, shape, name=None):
+def create_param(spec, shape, name=None, broadcast_unit_dims=True):
     """
     Helper method to create Theano shared variables for layer parameters
     and to initialize them.
@@ -337,7 +337,10 @@ def create_param(spec, shape, name=None):
         The name to give to the parameter variable. Ignored if `spec`
         is or returns a Theano expression or shared variable that
         already has a name.
-
+    
+    broadcast_unit_dims: bool, optional
+        When creating a shared variable whether to make it broadcastable
+        along any axis where its size is 1.
 
     Returns
     -------
@@ -381,8 +384,11 @@ def create_param(spec, shape, name=None):
         # We assume parameter variables do not change shape after creation.
         # We can thus fix their broadcast pattern, to allow Theano to infer
         # broadcastable dimensions of expressions involving these parameters.
-        bcast = tuple(s == 1 for s in shape)
-        spec = theano.shared(spec, broadcastable=bcast)
+        if broadcast_unit_dims:
+            bcast = tuple(s == 1 for s in shape)
+            spec = theano.shared(spec, broadcastable=bcast)
+        else:
+            spec = theano.shared(spec)
 
     if isinstance(spec, theano.Variable):
         # We cannot check the shape here, Theano expressions (even shared
