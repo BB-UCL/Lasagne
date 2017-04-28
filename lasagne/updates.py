@@ -113,7 +113,7 @@ def lr_decay(updates_fn):
             utils.floatX(learning_rate), "learning_rate")
         updates = updates_fn(loss_or_grads, params, learning_rate,
                              *args, **kwargs)
-        updates = apply_learning_rate_decay(updates, learning_rate, 
+        updates = apply_learning_rate_decay(updates, learning_rate,
                                             decay_period, decay_factor)
         return updates
     return get_updates
@@ -189,7 +189,7 @@ def sgd(loss_or_grads, params, learning_rate):
     return updates
 
 
-def apply_momentum(updates, params=None, momentum=0.9):
+def apply_momentum(updates, params=None, momentum=0.9, velocities=None):
     """Returns a modified update dictionary including momentum
 
     Generates update expressions of the form:
@@ -226,10 +226,12 @@ def apply_momentum(updates, params=None, momentum=0.9):
         params = updates.keys()
     updates = OrderedDict(updates)
 
-    for param in params:
+    def make_velocity(param):
         value = param.get_value(borrow=True)
-        velocity = theano.shared(np.zeros(value.shape, dtype=value.dtype),
-                                 broadcastable=param.broadcastable)
+        return theano.shared(np.zeros(value.shape, dtype=value.dtype),
+                             broadcastable=param.broadcastable)
+    velocities = [make_velocity(p) for p in params] if velocities is None else velocities
+    for param, velocity in zip(params, velocities):
         x = momentum * velocity + updates[param]
         updates[velocity] = x - param
         updates[param] = x
@@ -238,7 +240,7 @@ def apply_momentum(updates, params=None, momentum=0.9):
 
 
 @lr_decay
-def momentum(loss_or_grads, params, learning_rate, momentum=0.9):
+def momentum(loss_or_grads, params, learning_rate, momentum=0.9, velocities=None):
     """Stochastic Gradient Descent (SGD) updates with momentum
 
     Generates update expressions of the form:
@@ -257,9 +259,9 @@ def momentum(loss_or_grads, params, learning_rate, momentum=0.9):
     momentum : float or symbolic scalar, optional
         The amount of momentum to apply. Higher momentum results in
         smoothing over more update steps. Defaults to 0.9.
-    burnout: int 
-        The number of iterations for which initially to run SGD without momentum.
-
+    velocities: list of shared variables
+        Initial already created velocities variables
+        
     Returns
     -------
     OrderedDict
@@ -276,10 +278,10 @@ def momentum(loss_or_grads, params, learning_rate, momentum=0.9):
     nesterov_momentum : Nesterov's variant of SGD with momentum
     """
     updates = sgd(loss_or_grads, params, learning_rate)
-    return apply_momentum(updates, momentum=momentum)
+    return apply_momentum(updates, momentum=momentum, velocities=velocities)
 
 
-def apply_nesterov_momentum(updates, params=None, momentum=0.9):
+def apply_nesterov_momentum(updates, params=None, momentum=0.9, velocities=None):
     """Returns a modified update dictionary including Nesterov momentum
 
     Generates update expressions of the form:
@@ -297,7 +299,9 @@ def apply_nesterov_momentum(updates, params=None, momentum=0.9):
     momentum : float or symbolic scalar, optional
         The amount of momentum to apply. Higher momentum results in
         smoothing over more update steps. Defaults to 0.9.
-
+    velocities: list of shared variables
+        Initial already created velocities variables
+        
     Returns
     -------
     OrderedDict
@@ -322,10 +326,12 @@ def apply_nesterov_momentum(updates, params=None, momentum=0.9):
         params = updates.keys()
     updates = OrderedDict(updates)
 
-    for param in params:
+    def make_velocity(param):
         value = param.get_value(borrow=True)
-        velocity = theano.shared(np.zeros(value.shape, dtype=value.dtype),
-                                 broadcastable=param.broadcastable)
+        return theano.shared(np.zeros(value.shape, dtype=value.dtype),
+                             broadcastable=param.broadcastable)
+    velocities = [make_velocity(p) for p in params] if velocities is None else velocities
+    for param, velocity in zip(params, velocities):
         x = momentum * velocity + updates[param] - param
         updates[velocity] = x
         updates[param] = momentum * x + updates[param]
@@ -334,7 +340,7 @@ def apply_nesterov_momentum(updates, params=None, momentum=0.9):
 
 
 @lr_decay
-def nesterov_momentum(loss_or_grads, params, learning_rate, momentum=0.9):
+def nesterov_momentum(loss_or_grads, params, learning_rate, momentum=0.9, velocities=None):
     """Stochastic Gradient Descent (SGD) updates with Nesterov momentum
 
     Generates update expressions of the form:
@@ -353,6 +359,8 @@ def nesterov_momentum(loss_or_grads, params, learning_rate, momentum=0.9):
     momentum : float or symbolic scalar, optional
         The amount of momentum to apply. Higher momentum results in
         smoothing over more update steps. Defaults to 0.9.
+    velocities: list of shared variables
+        Initial already created velocities variables
 
     Returns
     -------
@@ -375,7 +383,7 @@ def nesterov_momentum(loss_or_grads, params, learning_rate, momentum=0.9):
     apply_nesterov_momentum : Function applying momentum to updates
     """
     updates = sgd(loss_or_grads, params, learning_rate)
-    return apply_nesterov_momentum(updates, momentum=momentum)
+    return apply_nesterov_momentum(updates, momentum=momentum, velocities=velocities)
 
 
 @lr_decay
