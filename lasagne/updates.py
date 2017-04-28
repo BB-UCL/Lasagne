@@ -83,21 +83,21 @@ __all__ = [
     "adamax",
     "norm_constraint",
     "total_norm_constraint",
-    "apply_learning_rate_decay",
+    "apply_decay",
     "lr_decay"
 ]
 
 
-def apply_learning_rate_decay(updates, learning_rate, period=0, factor=0.5):
-    if period > 0:
-        count = theano.shared(1, "decay_count")
+def apply_decay(updates, params, period=0, factor=0.5):
+    if period <= 0:
+        return updates
+
+    for p in params:
+        count = theano.shared(1, p.name+utils.SCOPE_DELIMITER+"decay_count")
         one = T.constant(1, dtype=count.dtype)
         cond = T.ge(count, period)
-        updates[count] = ifelse(cond, one, count + one)
-        updates[learning_rate] = ifelse(cond,
-                                        learning_rate * factor,
-                                        learning_rate)
-
+        updates[count] = ifelse(cond, one, count+one)
+        updates[p] = ifelse(cond, p*factor, p)
     return updates
 
 
@@ -113,8 +113,8 @@ def lr_decay(updates_fn):
             utils.floatX(learning_rate), "learning_rate")
         updates = updates_fn(loss_or_grads, params, learning_rate,
                              *args, **kwargs)
-        updates = apply_learning_rate_decay(updates, learning_rate, 
-                                            decay_period, decay_factor)
+        updates = apply_decay(updates, [learning_rate],
+                              decay_period, decay_factor)
         return updates
     return get_updates
 
