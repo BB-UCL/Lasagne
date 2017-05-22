@@ -13,3 +13,4 @@ from .embedding import *
 # from .recurrent import *
 from .recurrent_new import *
 from .special import *
+from .losses import *

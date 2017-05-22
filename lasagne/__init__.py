@@ -28,7 +28,9 @@ from . import objectives
 from . import random
 from . import regularization
 from . import updates
+from . import skfgn
 from . import utils
+from . import reporting
 
 
 __version__ = "0.2.dev1"

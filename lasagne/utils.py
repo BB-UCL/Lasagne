@@ -25,6 +25,23 @@ def floatX(arr):
     return np.asarray(arr, dtype=theano.config.floatX)
 
 
+def th_fx(var):
+    """Converts the input variable to a symbolic Theano expression 
+    of dtype ``theano.config.floatX``.
+
+    Parameters
+    ----------
+        var : Theano expression, Theano variable or numpy array
+            The expression to be converted.
+
+    Returns
+    -------
+        A symbolic Theano expression representing the cast of the
+        variable to ``floatX``
+    """
+    return T.cast(var, theano.config.floatX)
+
+
 def shared_empty(dim=2, dtype=None):
     """Creates empty Theano shared variable.
 
@@ -487,19 +504,49 @@ def unroll_scan(fn, sequences, outputs_info, non_sequences, n_steps,
 
 
 def to_tuple(x):
+    """
+    Helper function that converts x to a tuple (x, ) if x is not a list or
+    tuple otherwise returns x.
+    
+    Parameters
+    ----------
+
+    x : Any python expression
+        Expression to convert
+    
+    Returns
+    -------
+    Either x or (x ,)
+    """
     if isinstance(x, (tuple, list)):
         return x
     else:
         return x,
 
 
-def shape_to_tuple(shape):
-    if isinstance(shape, (T.TensorVariable, T.Variable)):
-        return shape,
-    elif isinstance(shape[0], int) or shape[0] is None:
-        return shape,
+def shape_to_tuple(shape_or_shapes):
+    """
+    Helper function that converts the input to a tuple of shapes
+    if it is not already that.
+
+    Parameters
+    ----------
+
+    shape_or_shapes : A list, tuple or Theano expression
+        Expression to convert
+
+    Returns
+    -------
+    Either shape_or_shapes or (shape_or_shapes, )
+    """
+    if isinstance(shape_or_shapes, (T.TensorVariable, T.Variable)):
+        return shape_or_shapes,
+    elif not isinstance(shape_or_shapes, (tuple, list)):
+        raise ValueError("Input must tuple, list or Theano expression.")
+    elif isinstance(shape_or_shapes[0], int) or shape_or_shapes[0] is None:
+        return shape_or_shapes,
     else:
-        return shape
+        return shape_or_shapes
 
 
 def extract_clean_dims(shape):
@@ -507,6 +554,21 @@ def extract_clean_dims(shape):
 
 
 def broadcast_to_none(shape):
+    """
+    Helper function which returns the pattern needed to be passed to
+    dimshuffle for a variable having only the non None dimensions of
+    the shape
+
+    Parameters
+    ----------
+
+    shape : A list or tuple
+        The shape for which the pattern is needed
+
+    Returns
+    -------
+    The pattern for dimshuffle
+    """
     pattern = ()
     c = 0
     for s in shape:
@@ -519,14 +581,252 @@ def broadcast_to_none(shape):
 
 
 def theano_print_shape(var, msg):
+    """
+    Helper function for printing the shape of a Theano expression during run
+    time of the Theano graph.
+
+    Parameters
+    ----------
+
+    var : Theano expression
+        The variable whose shape to be printed at runtime.
+    
+    msg : str 
+        The message to be printed together with the shape.
+
+    Returns
+    -------
+    A Theano expression which should be used instead of the original expression
+    in order the printing to happen.
+    """
     pr = Print(msg)(T.shape(var))
     return T.switch(T.lt(0, 1), var, T.cast(pr[0], var.dtype))
 
 
-def theano_print_min_max_vals(var, msg):
+def theano_print_min_max(var, msg):
+    """
+    Helper function for printing the min and the max values of a 
+    Theano expression during run time of the Theano graph.
+
+    Parameters
+    ----------
+
+    var : Theano expression
+        The variable whose mi and max values to be printed at runtime.
+
+    msg : str 
+        The message to be printed together min and max.
+
+    Returns
+    -------
+    A Theano expression which should be used instead of the original expression
+    in order the printing to happen.
+    """
     pr = Print(msg)(T.stack((T.min(var), T.max(var))))
     return T.switch(T.lt(0, 1), var, T.cast(pr[0], var.dtype))
 
 
-def theano_print_vals(var, msg):
+def theano_print_values(var, msg):
+    """
+    Helper function for printing the all of the values of a 
+    Theano expression during run time of the Theano graph.
+
+    Parameters
+    ----------
+
+    var : Theano expression
+        The variable whose mi and max values to be printed at runtime.
+
+    msg : str 
+        The message to be printed together values.
+
+    Returns
+    -------
+    A Theano expression which should be used instead of the original expression
+    in order the printing to happen.
+    """
     return Print(msg)(var)
+
+
+def frobenius_norm(var):
+    """
+    Calculates the Frobenius norm of the input using Theano.
+    
+    The input must be a two dimensional matrix.
+
+    Parameters
+    ----------
+
+    var : numpy array or Theano expression
+        The matrix for which to calculate the norm.
+
+    Returns
+    -------
+    Theano expression of the Frobenius norm of the input.
+    """
+    assert var.ndim == 2
+    return T.sqrt(T.sum(T.sqr(var)))
+
+
+def mean_frobenius_norm(var):
+    """
+    Calculates the Mean Frobenius norm of the input using Theano.
+    This is the Frobenius norm divided inside the square root by number of 
+    columns of the matrix.
+
+    The input must be a two dimensional matrix.
+
+    Parameters
+    ----------
+
+    var : numpy array or Theano expression
+        The matrix for which to calculate the norm.
+
+    Returns
+    -------
+    Theano expression of the Mean Frobenius of the input.
+    """
+    assert var.ndim == 2
+    return T.sqrt(T.mean(T.sum(T.sqr(var), axis=1)))
+
+
+def trace_norm(var):
+    """
+    Calculates the Trace norm of the input using Theano.
+
+    The input must be a two dimensional matrix.
+
+    Parameters
+    ----------
+
+    var : numpy array or Theano expression
+        The matrix for which to calculate the norm.
+
+    Returns
+    -------
+    Theano expression of the Trace norm of the input.
+    """
+    assert var.ndim == 2
+    return T.sum(T.diag(var))
+
+
+def mean_trace_norm(var):
+    """
+    Calculates the Mean Trace norm of the input using Theano.
+    This is the Trace norm divided by number of columns of the matrix.
+    
+    The input must be a two dimensional matrix.
+
+    Parameters
+    ----------
+
+    var : numpy array or Theano expression
+        The matrix for which to calculate the norm.
+
+    Returns
+    -------
+    Theano expression of the Mean Trace of the input.
+    """
+    assert var.ndim == 2
+    return T.mean(T.diag(var))
+
+
+def gauss_newton_product(outputs, outputs_hess, params, v1, v2=None):
+    """
+    Calculates the quadratic product between the Generalized Gauss-Newton 
+    matrix and two vectors:
+    
+    :math:`v_1^T G v_2`
+    
+    If v2 is None than v2=v1.
+    
+    The first dimension is assumed to be mini-batch dimension.
+
+    Parameters
+    ----------
+    
+    outputs: Theano expression
+        The outputs of the function for which to compute the product.
+        
+    outputs_hess : Theano expression
+        The Hessian matrix of the objective with respect to each data point.
+        If this is two dimensional, than it is assumed as the diagonal of 
+        the Hessian.
+        !!! Currently only two dimensional is supported !!!.
+
+    Returns
+    -------
+    The expected value of the product with the Generalized Gauss-Newton matrix.
+    """
+    assert outputs_hess.ndim == 2
+    Jv1 = T.Rop(outputs, params, v1)
+    Jv2 = T.Rop(outputs, params, v2) if v2 else Jv1
+    return T.mean(T.sum(Jv1 * Jv2 * outputs_hess, axis=1))
+
+
+def linear_solve(A, b, A_structure="general"):
+    """
+    Solves the linear system:
+
+    :math:`Ax = b`
+
+    using the correct Theano Op based on the current device.
+        
+    This is needed as Theano's optimization currently does not pass the 
+    A_structure when optimizing the standard Op to the GpuOp.
+
+    Parameters
+    ----------
+
+    A: Theano expression
+        Must be a square matrix.
+    
+    b: Theano expression
+        Must be a matrix.
+        
+    A_structure : str
+        One of 'general' or 'symmetric'.
+
+    Returns
+    -------
+    The solution to the linear system computed on the current Theano device.
+    """
+    if theano.config.device.startswith("cpu"):
+        from theano.tensor.slinalg import Solve
+        return Solve(A_structure=A_structure)(A, b)
+    else:
+        from theano.gpuarray.linalg import GpuCusolverSolve
+        return GpuCusolverSolve(A_structure=A_structure)(A, b)
+
+
+def repeat_variable(var, repeats, axis=0):
+    """
+    Helper function to repeat a variable along the given axis, such that
+    the result along that axis is in the form:
+    [var1, var1, var1, ..., var2, var2, var2, ..., varN, varN, varN, ...]
+
+    Parameters
+    ----------
+
+    var : TensorVariable
+        The variable which to be repeated/expanded
+    
+    repeats: int
+        Number of repeats.
+        
+    axis: int
+        Axis along which to expand the variable.
+        value.
+    
+    Returns
+    -------
+    The expanded variable.
+    """
+    if repeats == 1:
+        return var
+    shape = [var.shape[i] for i in range(var.ndim)]
+    extra_shape = shape[:axis] + [1] + shape[axis:]
+    repeats = [1 for _ in shape[:axis]] + [repeats] + [1 for _ in shape[axis:]]
+    expanded = T.tile(var.reshape(extra_shape), repeats)
+    shape[axis] *= repeats[axis]
+    return expanded.reshape(shape)

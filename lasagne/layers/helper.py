@@ -108,7 +108,7 @@ def get_all_layers(layer, treat_as_input=None):
     return result
 
 
-def get_outputs(layer_or_layers, inputs=None, **kwargs):
+def get_outputs(layer_or_layers, inputs=None, get_maps=False, **kwargs):
     """
     Computes the output of the network at one or more given layers.
     Optionally, you can define the input(s) to propagate through the network
@@ -132,12 +132,23 @@ def get_outputs(layer_or_layers, inputs=None, **kwargs):
         If a dictionary, any :class:`Layer` instance (including the
         input layers) can be mapped to a Theano expression or numpy
         array to use instead of its regular output.
+        
+    get_maps: bool 
+        Whether to return all_inputs and all_outputs dictionaries.
 
     Returns
     -------
     output : Theano expression or list
         the output of the given layer(s) for the given network input
-
+    
+    all_inputs: (Optional) dictionary
+        mapping between a :class:`Layer` instance and the inputs that were 
+        fed into it during computation.
+    
+    all_outputs: (Optional) dictionary
+        mapping between a :class:`Layer` instance and the outputs produced by 
+        it during computation.
+    
     Notes
     -----
     Depending on your network architecture, `get_output([l1, l2])` may
@@ -171,6 +182,7 @@ def get_outputs(layer_or_layers, inputs=None, **kwargs):
         for input_layer in all_outputs:
             all_outputs[input_layer] = (utils.as_theano_expression(inputs), )
     # update layer-to-expression mapping by propagating the inputs
+    all_inputs = dict()
     for layer in all_layers:
         if layer not in all_outputs:
             try:
@@ -184,6 +196,7 @@ def get_outputs(layer_or_layers, inputs=None, **kwargs):
                                  "layer %r. Please call it with a dictionary "
                                  "mapping this layer to an input expression."
                                  % layer)
+            all_inputs[layer] = layer_inputs
             all_outputs[layer] = layer.get_outputs_for(layer_inputs, **kwargs)
             try:
                 accepted_kwargs |= set(utils.inspect_kwargs(
@@ -206,18 +219,34 @@ def get_outputs(layer_or_layers, inputs=None, **kwargs):
              % "\n\t".join(suggestions))
     # return the output(s) of the requested layer(s) only
     if isinstance(layer_or_layers, (tuple, list)):
-        return tuple(all_outputs[layer] for layer in layer_or_layers)
+        if get_maps:
+            return tuple(all_outputs[layer] for layer in layer_or_layers), all_inputs, all_outputs
+        else:
+            return tuple(all_outputs[layer] for layer in layer_or_layers)
+    elif get_maps:
+        return all_outputs[layer_or_layers], all_inputs, all_outputs
     else:
         return all_outputs[layer_or_layers]
 
 
-def get_output(layer_or_layers, inputs=None, **kwargs):
-    outputs = get_outputs(layer_or_layers, inputs=inputs, **kwargs)
-    if len(outputs) == 1:
-        return outputs[0]
+def get_output(layer_or_layers, inputs=None, get_maps=False, **kwargs):
+    if get_maps:
+        outputs, input_map, output_map = get_outputs(layer_or_layers,
+                                                     inputs=inputs,
+                                                     get_maps=get_maps,
+                                                     **kwargs)
+        if len(outputs) == 1:
+            return outputs[0], input_map, output_map
+        else:
+            raise ValueError("The layer has more than 1 output, "
+                             "use `get_outputs`.")
     else:
-        raise ValueError("The layer has more than 1 output, "
-                         "use `get_outputs`.")
+        outputs = get_outputs(layer_or_layers, inputs=inputs, **kwargs)
+        if len(outputs) == 1:
+            return outputs[0]
+        else:
+            raise ValueError("The layer has more than 1 output, "
+                             "use `get_outputs`.")
 
 
 def get_output_shapes(layer_or_layers, input_shapes=None):

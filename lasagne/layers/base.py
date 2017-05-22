@@ -196,6 +196,7 @@ class Layer(object):
         (e.g. because it applies an elementwise operation) does not need
         to override this method.
         """
+        assert len(input_shapes) == len(self.input_shapes)
         return input_shapes
 
     def get_output_shape_for(self, input_shapes):
@@ -341,15 +342,65 @@ class Layer(object):
         self._prefix = value
         self.name = self._name
 
+    def skfgn(self, optimizer, inputs, outputs, curvature, q_map, g_map):
+        """
+        Stochastic Kronecker-Factored Gauss-Newton
+        
+        The method makes two computations:
+            1. Calculates the Q and G factors for any parameters of the layer
+                and adds them to the q_map and g_map
+            2. Propagates back the curvature information with respect to 
+                the input.
+        
+        
+        Parameters
+        ----------
+        optimizer: KFOptimizer instance
+            
+        inputs : Tuple of Theano expression
+            The inputs of the layer.
+
+        outputs : Tuple of Theano expression
+            The outputs of the layer.
+
+        curvature : Tuple of Theano expression
+            The activation square-roots of the activation Gauss-Newton matrices
+            with respect to the outputs of the layer. 
+        
+        q_map: dict 
+            A dictionary containing mapping from parameters to the corresponding
+            Q factors of the Gauss-Newton block. 
+        
+        g_map: dict 
+            A dictionary containing mapping from parameters to the corresponding
+            G factors of the Gauss-Newton block. 
+        
+        Returns
+        -------
+        Theano expressions for the Gauss-Newton matrices with respect to the 
+        inputs of the layer.
+        
+        By default the method is implemented for non-parametric layers and just
+        propagates the Jacobian-vector product
+        """
+        assert len(inputs) == len(self.input_shapes)
+        assert len(outputs) == self.num_outputs
+        assert len(curvature) == self.num_outputs
+        if optimizer.variant == "kfra":
+            raise NotImplementedError
+        else:
+            return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
+
 
 class IndexLayer(Layer):
     def __init__(self, incoming, indexes, including=True, **kwargs):
         super(IndexLayer, self).__init__(incoming, max_inputs=100, **kwargs)
         if not isinstance(indexes, (list, tuple)):
             indexes = (indexes, )
-        if len(indexes) > len(self.input_shapes):
-            raise ValueError("Filtering {} indexes, but have {} inputs"
-                             .format(len(indexes), len(self.input_shapes)))
+        for i in indexes:
+            if i >= len(self.input_shapes):
+                raise ValueError("Index provided - {}, but have only {} inputs."
+                                 .format(i, len(self.input_shapes)))
         if including:
             self.indexes = indexes
         else:
@@ -357,7 +408,9 @@ class IndexLayer(Layer):
                                  if i not in indexes)
 
     def get_output_shapes_for(self, input_shapes):
+        assert len(input_shapes) == len(self.input_shapes)
         return tuple(input_shapes[i] for i in self.indexes)
 
     def get_outputs_for(self, inputs, **kwargs):
+        assert len(inputs) == len(self.input_shapes)
         return tuple(inputs[i] for i in self.indexes)

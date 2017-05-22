@@ -808,8 +808,7 @@ def norm_constraint(tensor_var, max_norm, norm_axes=None, epsilon=1e-7):
     return constrained_output
 
 
-def total_norm_constraint(tensor_vars, max_norm, epsilon=1e-7,
-                          return_norm=False):
+def total_norm_constraint(tensor_vars, max_norm, target_vars=None, return_norm=False):
     """Rescales a list of tensors based on their combined norm
 
     If the combined norm of the input tensors exceeds the threshold then all
@@ -824,9 +823,8 @@ def total_norm_constraint(tensor_vars, max_norm, epsilon=1e-7,
         Tensors to be rescaled.
     max_norm : float
         Threshold value for total norm.
-    epsilon : scalar, optional
-        Value used to prevent numerical instability when dividing by
-        very small or zero norms.
+    target_vars : List of TensorVariables or None
+        If not None the norm is computed as the inner product of tensor_vars and target_vars.
     return_norm : bool
         If true the total norm is also returned.
 
@@ -864,10 +862,11 @@ def total_norm_constraint(tensor_vars, max_norm, epsilon=1e-7,
        learning with neural networks. In Advances in Neural Information
        Processing Systems (pp. 3104-3112).
     """
-    norm = T.sqrt(sum(T.sum(tensor**2) for tensor in tensor_vars))
-    dtype = np.dtype(theano.config.floatX).type
-    target_norm = T.clip(norm, 0, dtype(max_norm))
-    multiplier = target_norm / (dtype(epsilon) + norm)
+    if target_vars is None:
+        norm = T.sqrt(sum(T.sum(tensor**2) for tensor in tensor_vars))
+    else:
+        norm = T.sqrt(sum(T.sum(tensor * target) for tensor, target in zip(tensor_vars, target_vars)))
+    multiplier = T.minimum(T.constant(1), max_norm / norm)
     tensor_vars_scaled = [step*multiplier for step in tensor_vars]
 
     if return_norm:

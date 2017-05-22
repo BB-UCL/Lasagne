@@ -3,6 +3,7 @@ import theano.tensor as T
 
 from .. import init
 from .. import nonlinearities
+from ..utils import th_fx
 
 from .base import Layer
 
@@ -73,14 +74,14 @@ class DenseLayer(Layer):
     (None, 10, 20, 50)
     """
     def __init__(self, incoming, num_units, W=init.GlorotUniform(),
-                 b=init.Constant(0.), nonlinearity=nonlinearities.rectify,
-                 num_leading_axes=1, **kwargs):
+                 b=init.Constant(0.), nonlinearity=nonlinearities.identity,
+                 num_leading_axes=1, fused_bias=True, **kwargs):
         super(DenseLayer, self).__init__(incoming, **kwargs)
         self.nonlinearity = (nonlinearities.identity if nonlinearity is None
                              else nonlinearity)
 
         self.num_units = num_units
-
+        self.fused_bias = fused_bias
         if num_leading_axes >= len(self.input_shape):
             raise ValueError(
                 "Got num_leading_axes=%d for a %d-dimensional input, "
@@ -100,12 +101,22 @@ class DenseLayer(Layer):
                 (self.input_shape, self.num_leading_axes))
         num_inputs = int(np.prod(self.input_shape[num_leading_axes:]))
 
-        self.W = self.add_param(W, (num_inputs, num_units), name="W")
-        if b is None:
+        if fused_bias:
+            self.W = self.add_param(W, (num_inputs + 1, num_units), name="W",
+                                    broadcast_unit_dims=False)
+            b_val = b.sample((1, num_units))
+            w_val = self.W.get_value()
+            w_val[-1] = b_val
+            self.W.set_value(w_val)
             self.b = None
         else:
-            self.b = self.add_param(b, (num_units,), name="b",
-                                    regularizable=False)
+            self.W = self.add_param(W, (num_inputs, num_units), name="W",
+                                    broadcast_unit_dims=False)
+            if b is None:
+                self.b = None
+            else:
+                self.b = self.add_param(b, (num_units,), name="b",
+                                        regularizable=False)
 
     def get_output_shapes_for(self, input_shapes):
         input_shape = input_shapes[0]
@@ -120,10 +131,33 @@ class DenseLayer(Layer):
             # flatten trailing axes (into (n+1)-tensor for num_leading_axes=n)
             x = x.flatten(num_leading_axes + 1)
 
+        if self.fused_bias:
+            x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
         activation = T.dot(x, self.W)
         if self.b is not None:
             activation = activation + self.b
         return self.nonlinearity(activation),
+
+    def skfgn(self, optimizer, inputs, outputs, curvature, q_map, g_map):
+        assert len(inputs) == 1
+        assert len(curvature) == 1
+        assert len(outputs) == 1
+        assert self.fused_bias
+        x = inputs[0]
+        x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
+        curvature = curvature[0]
+        n = th_fx(x.shape[0])
+        q_map[self.W] = T.dot(x.T, x) / n
+        if optimizer.variant == "skfgn_rp" or \
+                        optimizer.variant == "skfgn_fisher" or \
+                        optimizer.variant == "kfac*" or \
+                        optimizer.variant == "skfgn_i":
+            g_map[self.W] = T.dot(curvature.T, curvature) / n
+            return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
+        elif optimizer.variant == "kfra":
+            g_map[self.W] = curvature
+            g = T.dot(T.dot(self.W[:-1], curvature), self.W[:-1].T)
+            return g,
 
 
 class NINLayer(Layer):
