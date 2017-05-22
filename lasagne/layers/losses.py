@@ -64,15 +64,15 @@ class SquareLoss(KFLossLayer):
         x, y = inputs
         assert len(curvature) == 1
         weight = curvature[0]
-        if optimizer.variant == "skfgn_rp":
+        if optimizer.variant == "skfgn-rp":
             cl_v = optimizer.random_sampler(x.shape)
             cl_v *= T.sqrt(weight)
             return cl_v, None
-        elif optimizer.variant == "skfgn_fisher" or optimizer.variant == "kfac*":
+        elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
             fake_dx = th_normal(x.shape)
             fake_dx *= T.sqrt(weight)
             return fake_dx, None
-        elif optimizer.variant == "skfgn_i":
+        elif optimizer.variant == "skfgn-i":
             raise NotImplementedError
         elif optimizer.variant == "kfra":
             if x.ndim == 1:
@@ -114,16 +114,16 @@ class BinaryLogitsCrossEntropy(KFLossLayer):
         assert len(curvature) == 1
         weight = curvature[0]
         p_x = T.nnet.sigmoid(x)
-        if optimizer.variant == "skfgn_rp":
+        if optimizer.variant == "skfgn-rp":
             v = optimizer.random_sampler(x.shape)
             cl_v = T.sqrt(p_x * (1 - p_x)) * v
             cl_v *= T.sqrt(weight)
             return cl_v, None
-        elif optimizer.variant == "skfgn_fisher" or optimizer.variant == "kfac*":
+        elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
             fake_dx = p_x - th_fx(th_binary(x.shape, p=p_x))
             fake_dx *= T.sqrt(weight)
             return fake_dx, None
-        elif optimizer.variant == "skfgn_i":
+        elif optimizer.variant == "skfgn-i":
             raise NotImplementedError
         elif optimizer.variant == "kfra":
             if x.ndim == 1:

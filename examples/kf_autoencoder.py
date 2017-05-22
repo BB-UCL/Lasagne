@@ -52,7 +52,7 @@ def main(dataset="mnist", batch_size=1000, epochs=20):
         raise ValueError("Unrecognized dataset:", dataset)
     arch = (input_dim, 1000, 500, 250, 50)
     in_vars, l_loss = autoencoder(arch, binary=binary)
-    optimizer = Optimizer(curvature_avg=0.9, mirror_avg=0.9)
+    optimizer = Optimizer(variant="skfgn-rp", curvature_avg=0.9, mirror_avg=0.9)
     updates, mirror_map, loss = optimizer(l_loss)
     train_f = theano.function(in_vars, loss, updates=updates)
 

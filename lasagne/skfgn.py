@@ -14,7 +14,7 @@ from .reporting import add_to_report
 
 class Optimizer(object):
     def __init__(self,
-                 variant="skfgn_rp",
+                 variant="skfgn-rp",
                  random_sampler=random.th_uniform_ball,
                  norm=utils.mean_trace_norm,
                  tikhonov_damping=1e-3,
@@ -32,11 +32,11 @@ class Optimizer(object):
         """
         Initialization parameters of the optimizer:
 
-        :param variant: str (default: "rkfgn_rp")
+        :param variant: str (default: "skfgn-rp")
             One of:
-                1. "skfgn_rp" - SKFGN-RP
-                2. "skfgn_fisher" - SKFGN-Fisher
-                3. "skfgn_i" - SKFGN-Index
+                1. "skfgn-rp" - SKFGN-RP
+                2. "skfgn-fisher" - SKFGN-Fisher
+                3. "skfgn-i" - SKFGN-Index
                 4. "kfac*" - KFAC*
                 5. "kfra" - KFRA
                 

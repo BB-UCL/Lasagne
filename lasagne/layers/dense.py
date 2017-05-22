@@ -6,7 +6,6 @@ from .. import nonlinearities
 from ..utils import th_fx, dfs_path
 
 from .base import Layer
-from .special import NonlinearityLayer
 
 
 __all__ = [
@@ -19,7 +18,8 @@ class DenseLayer(Layer):
     """
     lasagne.layers.DenseLayer(incoming, num_units,
     W=lasagne.init.GlorotUniform(), b=lasagne.init.Constant(0.),
-    nonlinearity=lasagne.nonlinearities.rectify, num_leading_axes=1, **kwargs)
+    nonlinearity=lasagne.nonlinearities.rectify, num_leading_axes=1, 
+    fused_bias=True, **kwargs)
 
     A fully connected layer.
 
@@ -51,7 +51,11 @@ class DenseLayer(Layer):
         will be kept in the output tensor, remaining axes will be collapsed and
         multiplied against the weight matrix. A negative number gives the
         (negated) number of trailing axes to involve in the dot product.
-
+    
+    fused_bias : bool
+        Whether to have a single parameter W for the concatenation of W and b 
+        or not.
+        
     Examples
     --------
     >>> from lasagne.layers import InputLayer, DenseLayer
@@ -143,30 +147,62 @@ class DenseLayer(Layer):
         assert len(inputs) == 1
         assert len(curvature) == 1
         assert len(outputs) == 1
-        assert self.fused_bias
+
         # Propagates the curvature trough the nonlinearity layer
         path = dfs_path(outputs[0], self.W)
         if self.b is None:
             activation = path[-2]
         else:
             activation = path[-3]
+        x = inputs[0]
+        curvature = curvature[0]
+        x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
+        n = th_fx(x.shape[0])
+        q = T.dot(x.T, x) / n
         if optimizer.variant == "kfra":
             if self.fused_bias:
-                curvature = T.Lop(outputs[0], activation, T.constant(1))
+                if self.nonlinearity != nonlinearities.identity:
+                    a = T.Lop(outputs[0], activation, T.ones_like(outputs[0]))
+                    g = curvature * T.dot(a.T, a) / n
+                else:
+                    g = curvature
+                kronecker_inversion(self, self.W, q, g)
+                return T.dot(T.dot(self.W[:-1], g), self.W[:-1].T),
             else:
                 raise NotImplementedError
         else:
-            curvature = T.Lop(outputs[0], activation, curvature[0])
             if self.fused_bias:
-                x = inputs[0]
-                x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
-                n = th_fx(x.shape[0])
-                q = T.dot(x.T, x) / n
+                if self.nonlinearity != nonlinearities.identity:
+                    curvature = T.Lop(outputs[0], activation, curvature)
                 g = T.dot(curvature.T, curvature) / n
                 kronecker_inversion(self, self.W, q, g)
                 return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
             else:
                 raise NotImplementedError
+        #
+        # # Propagates the curvature trough the nonlinearity layer
+        # path = dfs_path(outputs[0], self.W)
+        # if self.b is None:
+        #     activation = path[-2]
+        # else:
+        #     activation = path[-3]
+        # if optimizer.variant == "kfra":
+        #     if self.fused_bias:
+        #         curvature = T.Lop(outputs[0], activation, T.constant(1))
+        #     else:
+        #         raise NotImplementedError
+        # else:
+        #     curvature = T.Lop(outputs[0], activation, curvature[0])
+        #     if self.fused_bias:
+        #         x = inputs[0]
+        #         x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
+        #         n = th_fx(x.shape[0])
+        #         q = T.dot(x.T, x) / n
+        #         g = T.dot(curvature.T, curvature) / n
+        #         kronecker_inversion(self, self.W, q, g)
+        #         return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
+        #     else:
+        #         raise NotImplementedError
 
 
 class NINLayer(Layer):
