@@ -830,3 +830,17 @@ def repeat_variable(var, repeats, axis=0):
     expanded = T.tile(var.reshape(extra_shape), repeats)
     shape[axis] *= repeats[axis]
     return expanded.reshape(shape)
+
+
+def dfs_path(variable, target):
+    queue = [[variable]]
+    while len(queue) > 0:
+        path = queue.pop(0)
+        current = path[-1]
+        if current == target:
+            return path
+        if current.owner is not None:
+            for child in current.owner.inputs:
+                new_path = list(path) + [child]
+                queue.append(new_path)
+    raise ValueError("Did not find operator {} in the graph.".format(str(op)))

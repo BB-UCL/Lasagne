@@ -342,7 +342,7 @@ class Layer(object):
         self._prefix = value
         self.name = self._name
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, q_map, g_map):
+    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
         """
         Stochastic Kronecker-Factored Gauss-Newton
         
@@ -367,13 +367,14 @@ class Layer(object):
             The activation square-roots of the activation Gauss-Newton matrices
             with respect to the outputs of the layer. 
         
-        q_map: dict 
-            A dictionary containing mapping from parameters to the corresponding
-            Q factors of the Gauss-Newton block. 
-        
-        g_map: dict 
-            A dictionary containing mapping from parameters to the corresponding
-            G factors of the Gauss-Newton block. 
+        kronecker_inversion: callable
+            A function which to calculate the inversion of the Kronecker products
+            times the gradient. The signature of the function is:
+            kronecker_inversion(owning_layer, w, q, g)
+                owning_layer - The layer which owns w
+                w - the parameter
+                q - current mini-batch estimate of Q
+                g - current mini-batch estimate of G
         
         Returns
         -------

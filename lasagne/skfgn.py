@@ -136,10 +136,10 @@ class Optimizer(object):
         grads = upd.get_or_compute_grads(loss, params)
 
         # Make a mapping from parameters to their gradients
-        grads_map = OrderedDict((p, g) for p, g in zip(params, grads))
+        steps_map = OrderedDict((p, g) for p, g in zip(params, grads))
 
         # Calculate the SKFGN steps and all extra necessary updates
-        initial_steps, extra_updates, t = self.skfgn(loss_layer, grads_map,
+        initial_steps, extra_updates, t = self.skfgn(loss_layer, steps_map,
                                                      inputs_map, outputs_map,
                                                      treat_as_input)
 
@@ -218,9 +218,17 @@ class Optimizer(object):
               loss_grad=None, treat_as_input=None):
         loss_grad = 1 if loss_grad is None else loss_grad
         curvature_map = dict()
-        q_map = dict()
-        g_map = dict()
         input_curvature = dict()
+
+        steps_map = OrderedDict()
+        extra_updates = OrderedDict()
+        t = theano.shared(np.asarray(0, dtype=np.int64), name="skfgn_t")
+        extra_updates[t] = t + 1
+        t = utils.th_fx(extra_updates[t])
+
+        def kronecker_inversion(owning_layer, param, q, g):
+            self.kronecker_inversion(owning_layer, param, q, g, grads_map[param],
+                                     steps_map,  t, extra_updates)
 
         # Start from the loss layer
         curvature_map[loss_layer] = [loss_grad]
@@ -235,7 +243,7 @@ class Optimizer(object):
             inputs = inputs_map[layer]
             outputs = outputs_map[layer]
             curvature = curvature_map[layer]
-            curvature = layer.skfgn(self, inputs, outputs, curvature, q_map, g_map)
+            curvature = layer.skfgn(self, inputs, outputs, curvature, kronecker_inversion)
             assert len(curvature) == len(layer.input_layers)
 
             # Assign the output curvature to the corresponding layers
@@ -247,31 +255,32 @@ class Optimizer(object):
                 else:
                     curvature_map[l] = current_curvature
 
-        extra_updates = OrderedDict()
         steps = []
-        t = theano.shared(np.asarray(0, dtype=np.int64), name="skfgn_t")
-        extra_updates[t] = t + 1
-        t = utils.th_fx(extra_updates[t])
-        for w, grad in grads_map.items():
-            # Extract all layers owning the parameter
-            owning_layers = []
-            for l in all_layers:
-                if w in l.params:
-                    owning_layers.append(l)
-                    break
-            # Calculate the steps for each parameter
-            step = self.kronecker_inversion(owning_layers, w, q_map[w], g_map[w], grad, t, extra_updates)
-            steps.append(step)
+        for w, g in grads_map.items():
+            steps.append(steps_map.get(w, g))
+            if steps_map.get(w) is None:
+                print("Parameter", w, "was not update with SKFGN, falling back to just gradient")
+        # extra_updates = OrderedDict()
+        # steps = []
+        #
+        # t = utils.th_fx(extra_updates[t])
+        # for w, grad in grads_map.items():
+        #     # Extract all layers owning the parameter
+        #     owning_layers = []
+        #     for l in all_layers:
+        #         if w in l.params:
+        #             owning_layers.append(l)
+        #             break
+        #     # Calculate the steps for each parameter
+        #     step = self.kronecker_inversion(owning_layers, w, q_map[w], g_map[w], grad, t, extra_updates)
+        #     steps.append(step)
 
         return steps, extra_updates, t
 
-    def kronecker_inversion(self, layers, w, q, g, grad, t, updates):
-        if len(layers) > 1:
-            raise ValueError("Only single owning layer supported at the current stage.")
+    def kronecker_inversion(self, layer, w, q, g, grad, steps_map, t, updates):
         if w.ndim != 2:
             raise ValueError("Currently SKFGN is implemented only for matrix parameters."
                              "Try absorbing the bias in the weight matrix via 'fused_bias=True'")
-        layer = layers[0]
         q_dim, g_dim = w.shape.eval()
         name = w.name.split(utils.SCOPE_DELIMITER)[-1]
 
@@ -330,7 +339,7 @@ class Optimizer(object):
             g += T.eye(g_dim) * T.sqrt(self.tikhonov_damping) / omega
             step = utils.linear_solve(q, grad, "symmetric")
             step = utils.linear_solve(g, step.T, "symmetric").T
-        return step
+        steps_map[w] = step
 
     def gn_rescale(self, gauss_newton_product, grads, steps1, steps2=None):
         # The second order Taylor expansion of f(x) gives us:

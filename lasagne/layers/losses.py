@@ -28,7 +28,7 @@ class KFLossLayer(Layer):
     def get_outputs_for(self, inputs, **kwargs):
         raise NotImplementedError
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, q_map, g_map):
+    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
         raise NotImplementedError
 
     def gauss_newton_product(self, inputs, outputs, params, v1, v2=None):
@@ -60,7 +60,7 @@ class SquareLoss(KFLossLayer):
         else:
             return T.sum(T.sqr(x - y), axis=(1, 2, 3)) / 2,
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, q_map, g_map):
+    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
         x, y = inputs
         assert len(curvature) == 1
         weight = curvature[0]
@@ -109,7 +109,7 @@ class BinaryLogitsCrossEntropy(KFLossLayer):
         bce = T.flatten(bce, outdim=2)
         return T.sum(bce, axis=1),
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, q_map, g_map):
+    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
         x, y = inputs
         assert len(curvature) == 1
         weight = curvature[0]

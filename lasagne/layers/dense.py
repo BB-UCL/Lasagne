@@ -3,9 +3,10 @@ import theano.tensor as T
 
 from .. import init
 from .. import nonlinearities
-from ..utils import th_fx
+from ..utils import th_fx, dfs_path
 
 from .base import Layer
+from .special import NonlinearityLayer
 
 
 __all__ = [
@@ -74,7 +75,7 @@ class DenseLayer(Layer):
     (None, 10, 20, 50)
     """
     def __init__(self, incoming, num_units, W=init.GlorotUniform(),
-                 b=init.Constant(0.), nonlinearity=nonlinearities.identity,
+                 b=init.Constant(0.), nonlinearity=nonlinearities.rectify,
                  num_leading_axes=1, fused_bias=True, **kwargs):
         super(DenseLayer, self).__init__(incoming, **kwargs)
         self.nonlinearity = (nonlinearities.identity if nonlinearity is None
@@ -138,26 +139,34 @@ class DenseLayer(Layer):
             activation = activation + self.b
         return self.nonlinearity(activation),
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, q_map, g_map):
+    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
         assert len(inputs) == 1
         assert len(curvature) == 1
         assert len(outputs) == 1
         assert self.fused_bias
-        x = inputs[0]
-        x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
-        curvature = curvature[0]
-        n = th_fx(x.shape[0])
-        q_map[self.W] = T.dot(x.T, x) / n
-        if optimizer.variant == "skfgn_rp" or \
-                        optimizer.variant == "skfgn_fisher" or \
-                        optimizer.variant == "kfac*" or \
-                        optimizer.variant == "skfgn_i":
-            g_map[self.W] = T.dot(curvature.T, curvature) / n
-            return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
-        elif optimizer.variant == "kfra":
-            g_map[self.W] = curvature
-            g = T.dot(T.dot(self.W[:-1], curvature), self.W[:-1].T)
-            return g,
+        # Propagates the curvature trough the nonlinearity layer
+        path = dfs_path(outputs[0], self.W)
+        if self.b is None:
+            activation = path[-2]
+        else:
+            activation = path[-3]
+        if optimizer.variant == "kfra":
+            if self.fused_bias:
+                curvature = T.Lop(outputs[0], activation, T.constant(1))
+            else:
+                raise NotImplementedError
+        else:
+            curvature = T.Lop(outputs[0], activation, curvature[0])
+            if self.fused_bias:
+                x = inputs[0]
+                x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
+                n = th_fx(x.shape[0])
+                q = T.dot(x.T, x) / n
+                g = T.dot(curvature.T, curvature) / n
+                kronecker_inversion(self, self.W, q, g)
+                return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
+            else:
+                raise NotImplementedError
 
 
 class NINLayer(Layer):

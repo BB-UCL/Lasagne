@@ -1,7 +1,7 @@
 import lasagne.layers as L
 import numpy as np
 from lasagne.skfgn import Optimizer
-from lasagne.nonlinearities import tanh
+from lasagne.nonlinearities import tanh, identity
 import theano
 from bb_datasets import get_dataset
 import time
@@ -14,14 +14,16 @@ def autoencoder(arch, binary=True, nonl=tanh):
     # Encoder
     layer = l_in
     for i in range(1, len(arch)):
-        layer = L.DenseLayer(layer, arch[i], name="encode_" + str(i))
-        layer = L.NonlinearityLayer(layer, nonl, name="encode_" + str(i) + "_a")
+        layer = L.DenseLayer(layer, arch[i], nonlinearity=nonl,
+                             name="encode_" + str(i))
+        # layer = L.NonlinearityLayer(layer, nonl, name="encode_" + str(i) + "_a")
     # Decoder
     for i in reversed(range(1, len(arch) - 1)):
-        layer = L.DenseLayer(layer, arch[i], name="decode_" + str(i))
-        layer = L.NonlinearityLayer(layer, nonl, name="decode_" + str(i) + "_a")
+        layer = L.DenseLayer(layer, arch[i], nonlinearity=nonl,
+                             name="decode_" + str(i))
+        # layer = L.NonlinearityLayer(layer, nonl, name="decode_" + str(i) + "_a")
     # P(x|z)
-    layer = L.DenseLayer(layer, arch[0], name="p")
+    layer = L.DenseLayer(layer, arch[0], nonlinearity=identity, name="p")
     if binary:
         l_loss = L.BinaryLogitsCrossEntropy((layer, l_in), name="crossentropy")
     else:
