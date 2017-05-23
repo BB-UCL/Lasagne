@@ -6,6 +6,7 @@ from ..random import th_normal, th_binary
 
 __all__ = [
     "SKFGNLossLayer",
+    "SumLossesLayer",
     "SquareLoss",
     "BinaryLogitsCrossEntropy",
     "GaussianKL"
@@ -228,7 +229,7 @@ class GaussianKL(SKFGNLossLayer):
             q_mu = 0
             q_sigma = 1
         else:
-            raise ValueError("Unreachable")
+            raise ValueError("Unreachable state:", self.state)
         if expand:
             if self.state == 1 or self.state == 2:
                 q_mu = utils.expand_variable(q_mu, self.x_repeats)
@@ -263,7 +264,7 @@ class GaussianKL(SKFGNLossLayer):
         assert len(curvature) == 1
         curvature = curvature[0]
         g_q, g_p = None, None
-        if optimizer.variant == "skfgn-pr":
+        if optimizer.variant == "skfgn-rp":
             q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, True)
             # Samples
             if self.state == 1:
