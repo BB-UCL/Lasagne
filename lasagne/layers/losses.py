@@ -1,18 +1,20 @@
 import theano.tensor as T
+
+from .. import utils
 from ..layers import Layer
-from ..utils import gauss_newton_product, th_fx, repeat_variable
 from ..random import th_normal, th_binary
 
 __all__ = [
-    "KFLossLayer",
+    "SKFGNLossLayer",
     "SquareLoss",
-    "BinaryLogitsCrossEntropy"
+    "BinaryLogitsCrossEntropy",
+    "GaussianKL"
 ]
 
 
-class KFLossLayer(Layer):
+class SKFGNLossLayer(Layer):
     def __init__(self, incoming, x_repeats=1, y_repeats=1, *args, **kwargs):
-        super(KFLossLayer, self).__init__(incoming, *args, **kwargs)
+        super(SKFGNLossLayer, self).__init__(incoming, *args, **kwargs)
         self.x_repeats = x_repeats
         self.y_repeats = y_repeats
 
@@ -31,11 +33,42 @@ class KFLossLayer(Layer):
     def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
         raise NotImplementedError
 
-    def gauss_newton_product(self, inputs, outputs, params, v1, v2=None):
+    def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
         raise NotImplementedError
 
 
-class SquareLoss(KFLossLayer):
+class SumLossesLayer(SKFGNLossLayer):
+    """
+        Binary cross entropy = - y log(sigmoid(x)) - (1 - y) * log(sigmoid(-x))
+        """
+
+    def __init__(self, incoming, weights=None, report_weights=None, **kwargs):
+        super(SumLossesLayer, self).__init__(incoming, max_inputs=10, **kwargs)
+        if weights is None:
+            self.weights = [T.constant(1) for _ in self.input_shapes]
+        else:
+            self.weights = weights
+        if report_weights is None:
+            self.report_weights = self.weights
+        else:
+            self.report_weights = report_weights
+
+    def get_outputs_for(self, inputs, **kwargs):
+        assert len(inputs) == len(self.weights)
+        return sum(T.mean(i) * w for i, w in zip(inputs, self.report_weights)),
+
+    def get_output_shapes_for(self, input_shapes):
+        return ()
+
+    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+        return self.weights
+
+    def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
+        return sum(l_in.gauss_newton_quad(inputs_map, outputs_map, params, v1, v2) * w
+                   for l_in, w in zip(self.input_layers, self.weights))
+
+
+class SquareLoss(SKFGNLossLayer):
     """
     Squared loss = 0.5 (x - y)^T (x - y)
     """
@@ -49,8 +82,8 @@ class SquareLoss(KFLossLayer):
         assert len(inputs) == 2
         x, y = inputs
         assert x.ndim == y.ndim
-        x = repeat_variable(x, self.x_repeats)
-        y = repeat_variable(y, self.y_repeats)
+        x = utils.expand_variable(x, self.x_repeats)
+        y = utils.expand_variable(y, self.y_repeats)
         if x.ndim == 1:
             return T.sqr(x - y) / 2,
         elif x.ndim == 2:
@@ -85,12 +118,12 @@ class SquareLoss(KFLossLayer):
         else:
             raise ValueError("Unreachable")
 
-    def gauss_newton_product(self, inputs, outputs, params, v1, v2=None):
-        x, y = inputs
-        return gauss_newton_product(x, 1, params, v1, v2)
+    def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
+        x, y = inputs_map[self]
+        return utils.gauss_newton_product(x, 1, params, v1, v2)
 
 
-class BinaryLogitsCrossEntropy(KFLossLayer):
+class BinaryLogitsCrossEntropy(SKFGNLossLayer):
     """
     Binary logits cross entropy = - y log(sigmoid(x)) - (1 - y) * log(sigmoid(-x))
     """
@@ -102,8 +135,8 @@ class BinaryLogitsCrossEntropy(KFLossLayer):
         assert len(inputs) == 2
         x, y = inputs
         assert x.ndim == y.ndim
-        x = repeat_variable(x, self.x_repeats)
-        y = repeat_variable(y, self.y_repeats)
+        x = utils.expand_variable(x, self.x_repeats)
+        y = utils.expand_variable(y, self.y_repeats)
         p_x = T.nnet.sigmoid(x)
         bce = T.nnet.binary_crossentropy(p_x, y)
         bce = T.flatten(bce, outdim=2)
@@ -120,7 +153,7 @@ class BinaryLogitsCrossEntropy(KFLossLayer):
             cl_v *= T.sqrt(weight)
             return cl_v, None
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
-            fake_dx = p_x - th_fx(th_binary(x.shape, p=p_x))
+            fake_dx = p_x - utils.th_fx(th_binary(x.shape, p=p_x))
             fake_dx *= T.sqrt(weight)
             return fake_dx, None
         elif optimizer.variant == "skfgn-i":
@@ -136,11 +169,219 @@ class BinaryLogitsCrossEntropy(KFLossLayer):
         else:
             raise ValueError("Unreachable")
 
-    def gauss_newton_product(self, inputs, outputs, params, v1, v2=None):
-        x, y = inputs
+    def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
+        x, y = inputs_map[self]
         sigmoid = T.nnet.sigmoid(x)
         hess = sigmoid * (1 - sigmoid)
-        return gauss_newton_product(x, hess, params, v1, v2)
+        return utils.gauss_newton_product(x, hess, params, v1, v2)
 
 
+class GaussianKL(SKFGNLossLayer):
+    """
+    Calculates the KL(q||p) where q and p are isotropic Gaussian distributions.
 
+    !!! The arguments parametrize the mean and the standard deviation not the variance!!!
+
+    $$ KL(q||p) = \frac{1}{2} \sum_i \left( \frac{\sigma_{q_i}^2}{\sigma_{p_i}^2} + 
+    \frac{(\mu_{p_i} - \mu_{q_i})^2}{\sigma_{p_i}^2} - 1.0 + \log \sigma_{p_i}^2  - \log \sigma_{q_i}^2 \right)$$
+    """
+    def __init__(self, q=None, p=None, q_repeats=1, p_repeats=1, **kwargs):
+        if q is not None and p is not None:
+            self.state = 1
+            incoming = (q, p)
+        elif q is not None:
+            self.state = 2
+            incoming = q
+        elif p is not None:
+            self.state = 3
+            incoming = p
+        else:
+            raise ValueError("Both q and p are None")
+        super(GaussianKL, self).__init__(incoming,
+                                         x_repeats=q_repeats,
+                                         y_repeats=p_repeats,
+                                         max_inputs=2, **kwargs)
+
+    def extract_q_p(self, inputs, expand=False, get_q_p=False):
+        assert len(self.input_shapes) == len(inputs)
+        if self.state == 1:
+            q, p = inputs
+            n = T.int_div(q.shape[1], 2)
+            q_mu = q[:, :n]
+            q_sigma = q[:, n:]
+            p_mu = p[:, :n]
+            p_sigma = p[:, n:]
+        elif self.state == 2:
+            q, = inputs
+            p = None
+            n = T.int_div(q.shape[1], 2)
+            q_mu = q[:, :n]
+            q_sigma = q[:, n:]
+            p_mu = 0
+            p_sigma = 1
+        elif self.state == 3:
+            p, = inputs
+            q = None
+            n = T.int_div(p.shape[1], 2)
+            p_mu = p[:, :n]
+            p_sigma = p[:, n:]
+            q_mu = 0
+            q_sigma = 1
+        else:
+            raise ValueError("Unreachable")
+        if expand:
+            if self.state == 1 or self.state == 2:
+                q_mu = utils.expand_variable(q_mu, self.x_repeats)
+                q_sigma = utils.expand_variable(q_sigma, self.x_repeats)
+            if self.state == 1 or self.state == 3:
+                p_mu = utils.expand_variable(p_mu, self.x_repeats)
+                p_sigma = utils.expand_variable(p_sigma, self.x_repeats)
+        if get_q_p:
+            return q, p, q_mu, q_sigma, p_mu, p_sigma
+        else:
+            return q_mu, q_sigma, p_mu, p_sigma
+
+    def get_outputs_for(self, inputs, **kwargs):
+        q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, True)
+        # Trace
+        kl = T.sqr(q_sigma)
+        # Means difference
+        kl += T.sqr(q_mu - p_mu)
+        # Both times inverse of sigma p
+        kl /= T.sqr(p_sigma)
+        # Minus 1
+        kl -= T.constant(1)
+        # Log determinant of p_sigma
+        kl += 2 * T.log(p_sigma)
+        # Log determinant of q_sigma
+        kl -= 2 * T.log(p_sigma)
+        # Flatten
+        kl = T.flatten(kl, outdim=2)
+        return 0.5 * T.sum(kl, axis=1),
+
+    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+        assert len(curvature) == 1
+        curvature = curvature[0]
+        g_q, g_p = None, None
+        if optimizer.variant == "skfgn-pr":
+            q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, True)
+            # Samples
+            if self.state == 1:
+                v_q_mu, v_q_sigma, v_p_mu, v_p_sigma = optimizer.random_sampler((q_mu, q_sigma, p_mu, p_sigma))
+            elif self.state == 2:
+                v_q_mu, v_q_sigma = optimizer.random_sampler((q_mu, q_sigma))
+                v_p_mu, v_p_sigma = None, None
+            elif self.state == 3:
+                v_p_mu, v_p_sigma = optimizer.random_sampler((p_mu, p_sigma))
+                v_q_mu, v_q_sigma = None, None
+            else:
+                raise NotImplementedError
+            # Calculate Gauss-Newton matrices
+            if self.state == 1 or self.state == 2:
+                # Q
+                g_q_mu = v_q_mu / p_sigma
+                g_q_mu = utils.collapse_variable(g_q_mu, self.x_repeats)
+                g_q_sigma = v_q_sigma * T.sqrt(T.inv(T.sqr(p_sigma)) + T.inv(T.sqr(q_sigma)))
+                g_q_sigma = utils.collapse_variable(g_q_sigma, self.x_repeats)
+                g_q = T.concatenate((g_q_mu, g_q_sigma), axis=1)
+                g_q *= T.sqrt(curvature)
+            if self.state == 1 or self.state == 3:
+                # P
+                g_p_mu = v_p_mu / T.sqr(p_sigma)
+                g_p_mu = utils.collapse_variable(g_p_mu, self.y_repeats)
+                g_p_sigma = 2 * v_p_sigma / T.sqr(p_sigma)
+                g_p_sigma = utils.collapse_variable(g_p_sigma, self.y_repeats)
+                g_p = T.concatenate((g_p_mu, g_p_sigma), axis=1)
+                g_p *= T.sqrt(curvature)
+        elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
+            q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, False)
+            # Samples
+            if self.state == 1:
+                fake_q, fake_p = th_normal((q_mu.shape, p_mu.shape))
+            elif self.state == 2:
+                fake_q = th_normal(q_mu.shape)
+                fake_p = None
+            elif self.state == 3:
+                fake_p = th_normal(p_mu.shape)
+                fake_q = None
+            else:
+                raise NotImplementedError
+            # Calculate gradients with from the samples
+            if self.state == 1 or self.state == 2:
+                # Q
+                d_q_mu = fake_q / q_sigma
+                d_q_sigma = (fake_q - 1) / q_sigma
+                d_q = T.concatenate((d_q_mu, d_q_sigma), axis=1)
+                g_q = d_q * T.sqrt(curvature)
+            if self.state == 1 or self.state == 3:
+                # P
+                d_p_mu = fake_q / q_sigma
+                d_p_sigma = (fake_p - 1) / p_sigma
+                d_p = T.concatenate((d_p_mu, d_p_sigma), axis=1)
+                g_p = d_p * T.sqrt(curvature)
+        elif optimizer.variant == "skfgn-i":
+            raise NotImplementedError
+        elif optimizer.variant == "kfra":
+            q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, True)
+            if self.state == 1 or self.state == 2:
+                # Q
+                g_q_mu = T.mean(T.inv(T.sqr(p_sigma)), axis=0)
+                g_q_sigma = T.mean(T.inv(T.sqr(p_sigma)) + T.inv(T.sqr(q_sigma)), axis=0)
+                g_q = T.diag(T.concatenate((g_q_mu, g_q_sigma)))
+                g_q *= curvature
+            if self.state == 1 or self.state == 3:
+                # P
+                g_p_mu = T.mean(T.inv(p_sigma), axis=0)
+                g_p_sigma = 2 * g_p_mu
+                g_p = T.diag(T.concatenate((g_p_mu, g_p_sigma)))
+                g_p *= curvature
+        else:
+            raise ValueError("Unreachable")
+        if self.state == 1:
+            return g_q, g_p
+        elif self.state == 2:
+            return g_q,
+        elif self.state == 3:
+            return g_p,
+        else:
+            raise NotImplementedError
+
+    def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
+        q, p, q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs_map[self], True, True)
+        if self.state == 1 or self.state == 2:
+            Jv1_q = T.Rop(q, params, v1)
+            Jv1_q = utils.expand_variable(Jv1_q, self.x_repeats)
+            if v2 is not None:
+                Jv2_q = T.Rop(q, params, v2)
+                Jv2_q = utils.expand_variable(Jv2_q, self.x_repeats)
+            else:
+                Jv2_q = Jv1_q
+            # The Gauss-Newton for the last layer
+            if variant == "skfgn-fisher" or variant == "kfac*":
+                g_q_mu = T.inv(T.sqr(q_sigma))
+                g_q_sigma = 2 * g_q_mu
+            else:
+                g_q_mu = T.inv(T.sqr(p_sigma))
+                g_q_sigma = T.inv(T.sqr(p_sigma)) + T.inv(T.sqr(q_sigma))
+            g_q = T.concatenate((g_q_mu, g_q_sigma), axis=1)
+            v1Jv2_q = T.sum(Jv1_q * g_q * Jv2_q, axis=1)
+            v1Jv2_q = T.mean(v1Jv2_q)
+        else:
+            v1Jv2_q = 0
+        if self.state == 1 or self.state == 3:
+            Jv1_p = T.Rop(p, params, v1)
+            Jv1_p = utils.expand_variable(Jv1_p, self.y_repeats)
+            if v2 is not None:
+                Jv2_p = T.Rop(p, params, v2)
+                Jv2_p = utils.expand_variable(Jv2_p, self.y_repeats)
+            else:
+                Jv2_p = Jv1_p
+            # The Gauss-Newton for the last layer
+            g_p_mu = T.inv(T.sqr(p_sigma))
+            g_p_sigma = 2 * g_p_mu
+            g_p = T.concatenate((g_p_mu, g_p_sigma), axis=1)
+            v1Jv2_p = T.sum(Jv1_p * g_p * Jv2_p, axis=1)
+            v1Jv2_p = T.mean(v1Jv2_p)
+        else:
+            v1Jv2_p = 0
+        return v1Jv2_q + v1Jv2_p

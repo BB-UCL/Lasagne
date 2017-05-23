@@ -89,6 +89,7 @@ class Optimizer(object):
             At what period to update the `tihkonov_damping` parameter with the 
             Levenberg-Marquardt heuristic. If 0 then the damping is never updated.
         """
+        assert variant in ("skfgn-rp", "skfgn-fisher", "skfgn-i", "kfac*", "kfra")
         self.variant = variant
         self.random_sampler = random_sampler
         self.norm = norm
@@ -145,9 +146,8 @@ class Optimizer(object):
 
         # If using gn_momentum we need to create velocity vectors
         def gauss_newton_product(v1, v2=None):
-            return loss_layer.gauss_newton_product(inputs_map[loss_layer],
-                                                   outputs_map[loss_layer],
-                                                   params, v1, v2)
+            return loss_layer.gauss_newton_product(inputs_map, outputs_map,
+                                                   params, self.variant, v1, v2)
 
         if self.gn_momentum:
             def make_velocity(param):

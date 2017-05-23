@@ -179,30 +179,6 @@ class DenseLayer(Layer):
                 return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
             else:
                 raise NotImplementedError
-        #
-        # # Propagates the curvature trough the nonlinearity layer
-        # path = dfs_path(outputs[0], self.W)
-        # if self.b is None:
-        #     activation = path[-2]
-        # else:
-        #     activation = path[-3]
-        # if optimizer.variant == "kfra":
-        #     if self.fused_bias:
-        #         curvature = T.Lop(outputs[0], activation, T.constant(1))
-        #     else:
-        #         raise NotImplementedError
-        # else:
-        #     curvature = T.Lop(outputs[0], activation, curvature[0])
-        #     if self.fused_bias:
-        #         x = inputs[0]
-        #         x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
-        #         n = th_fx(x.shape[0])
-        #         q = T.dot(x.T, x) / n
-        #         g = T.dot(curvature.T, curvature) / n
-        #         kronecker_inversion(self, self.W, q, g)
-        #         return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
-        #     else:
-        #         raise NotImplementedError
 
 
 class NINLayer(Layer):

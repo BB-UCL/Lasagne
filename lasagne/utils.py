@@ -799,10 +799,10 @@ def linear_solve(A, b, A_structure="general"):
         return GpuCusolverSolve(A_structure=A_structure)(A, b)
 
 
-def repeat_variable(var, repeats, axis=0):
+def expand_variable(var, repeats, axis=0):
     """
-    Helper function to repeat a variable along the given axis, such that
-    the result along that axis is in the form:
+    Helper function to expand a variable number of times by repeating
+    it along the given axis, such that the result along on that axis is:
     [var1, var1, var1, ..., var2, var2, var2, ..., varN, varN, varN, ...]
 
     Parameters
@@ -816,7 +816,6 @@ def repeat_variable(var, repeats, axis=0):
         
     axis: int
         Axis along which to expand the variable.
-        value.
     
     Returns
     -------
@@ -832,15 +831,63 @@ def repeat_variable(var, repeats, axis=0):
     return expanded.reshape(shape)
 
 
-def dfs_path(variable, target):
-    queue = [[variable]]
+def collapse_variable(var, repeats, axis=0):
+    """
+    Reverses the expand_variable function by taking the mean of the repeats.
+
+    Parameters
+    ----------
+
+    var : TensorVariable
+        The variable which to be collapsed
+
+    repeats: int
+        Number of repeats.
+
+    axis: int
+        Axis along which to collapse the variable.
+
+    Returns
+    -------
+    The collapsed variable.
+    """
+    if repeats == 1:
+        return var
+    shape = [var.shape[i] for i in range(var.ndim)]
+    extra_shape = shape[:axis] + [repeats] + shape[axis:]
+    extra_shape[axis] = T.int_div(extra_shape[axis], repeats)
+    var = T.reshape(var, extra_shape)
+    return T.mean(var, axis=(axis + 1))
+
+
+def dfs_path(f, w):
+    """
+    Performs a Depth-First-Search trying to find the dependence path
+    of Theano expression of f with respect to w.
+
+    Parameters
+    ----------
+
+    f : TensorVariable
+        The source variable from which the DFS search starts.
+
+    w : TensorVariable
+        The variable to which we need to find the path. When this variable
+        is found the search stops and the path is returned.
+
+    Returns
+    -------
+    The path from f->w including the two expression. This means that 
+    f == path[0] and w == path[-1]
+    """
+    queue = [[f]]
     while len(queue) > 0:
         path = queue.pop(0)
         current = path[-1]
-        if current == target:
+        if current == w:
             return path
         if current.owner is not None:
             for child in current.owner.inputs:
                 new_path = list(path) + [child]
                 queue.append(new_path)
-    raise ValueError("Did not find operator {} in the graph.".format(str(op)))
+    raise ValueError("Did not find the variable {} in the graph.".format(str(w)))
