@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from warnings import warn
 
 import theano.tensor as T
 
@@ -387,6 +388,8 @@ class Layer(object):
         assert len(inputs) == len(self.input_shapes)
         assert len(outputs) == self.num_outputs
         assert len(curvature) == self.num_outputs
+        warn("Using default implementation of SKFGN for {}."
+             .format(str(self.__class__)))
         if optimizer.variant == "kfra":
             raise NotImplementedError
         else:

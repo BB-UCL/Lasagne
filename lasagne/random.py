@@ -9,12 +9,10 @@ from functools import wraps
 import numpy as np
 import theano
 import theano.tensor as T
-from theano.sandbox.rng_mrg import MRG_RandomStreams
+from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from theano.gradient import zero_grad
 
 _rng = np.random
-
-_mrng = None
 
 
 def get_rng():
@@ -41,23 +39,6 @@ def set_rng(new_rng):
     """
     global _rng
     _rng = new_rng
-
-
-def get_mrng():
-    global _mrng
-    if _mrng is None:
-        reset_mrng()
-    return _mrng
-
-
-def set_mrng(new_mrng):
-    global _mrng
-    _mrng = new_mrng
-
-
-def reset_mrng():
-    global _mrng
-    _mrng = MRG_RandomStreams(seed=get_rng().randint(1000000))
 
 
 def multi_sampler(sampler):
@@ -98,7 +79,8 @@ def multi_sampler(sampler):
 @multi_sampler
 def th_uniform(shape, min=0, max=1, dtype=None):
     dtype = dtype or theano.config.floatX
-    samples = get_mrng().uniform(shape, dtype=dtype)
+    srng = RandomStreams(get_rng().randint(1, 2147462579))
+    samples = srng.uniform(shape, dtype=dtype)
     samples = zero_grad(samples)
     if min != 0 or max != 1:
         samples *= (max - min) + min
@@ -108,7 +90,8 @@ def th_uniform(shape, min=0, max=1, dtype=None):
 @multi_sampler
 def th_normal(shape, mean=0, std=1, dtype=None):
     dtype = dtype or theano.config.floatX
-    samples = get_mrng().normal(shape, dtype=dtype)
+    srng = RandomStreams(get_rng().randint(1, 2147462579))
+    samples = srng.normal(shape, dtype=dtype)
     samples = zero_grad(samples)
     if std != 1:
         samples *= std
@@ -125,7 +108,8 @@ def th_binary(shape, p=0.5, v0=0, v1=1, dtype=None):
         v0 = v1
         v1 = temp
         p = 1 - p
-    samples = get_mrng().binomial(shape, p=p, dtype=dtype)
+    srng = RandomStreams(get_rng().randint(1, 2147462579))
+    samples = srng.binomial(shape, p=p, dtype=dtype)
     samples = zero_grad(samples)
     if v0 != 0 or v1 != 1:
         samples *= v1 - v0
