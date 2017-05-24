@@ -40,20 +40,20 @@ class GaussianParametersLayer(Layer):
             a = T.concatenate((T.ones_like(a), a), axis=1)
             return curvature[0] * T.dot(a.T, a) / n,
         else:
-            return T.Lop(outputs[0], inputs[0], curvature[0])
+            return T.Lop(outputs[0], inputs[0], curvature[0]),
 
 
 class GaussianSampleLayer(Layer):
     def __init__(self, incoming,
                  num_samples=1,
                  **kwargs):
-        super(GaussianSampleLayer, self).__init__(incoming, max_inputs=1, **kwargs)
+        super(GaussianSampleLayer, self).__init__(incoming, **kwargs)
         self.num_samples = num_samples
 
     def get_output_shapes_for(self, input_shapes):
         shape = input_shapes[0]
         assert shape[1] % 2 == 0
-        shape = [shape[0] * self.num_samples if shape[0] is not None else None, shape[1] // 2]
+        shape = (shape[0] * self.num_samples if shape[0] is not None else None, shape[1] // 2)
         return shape,
 
     def get_outputs_for(self, inputs, **kwargs):
@@ -96,4 +96,4 @@ class GaussianSampleLayer(Layer):
         elif optimizer.variant == "kfac*":
             return T.constant(0),
         else:
-            return T.Lop(outputs[0], inputs[0], curvature[0])
+            return T.Lop(outputs[0], inputs[0], curvature[0]),

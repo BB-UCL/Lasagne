@@ -28,7 +28,8 @@ class Optimizer(object):
                  update_function=upd.sgd,
                  exact_inversion=False,
                  gn_momentum=0,
-                 tikhonov_period=0):
+                 tikhonov_period=0,
+                 debug=False):
         """
         Initialization parameters of the optimizer:
 
@@ -88,6 +89,9 @@ class Optimizer(object):
         :param tikhonov_period: int (default: 0)
             At what period to update the `tihkonov_damping` parameter with the 
             Levenberg-Marquardt heuristic. If 0 then the damping is never updated.
+            
+        :param: debug: bool (defualt False)
+            Whether to print debug info when performing SKFGN
         """
         assert variant in ("skfgn-rp", "skfgn-fisher", "skfgn-i", "kfac*", "kfra")
         self.variant = variant
@@ -106,6 +110,7 @@ class Optimizer(object):
         self.exact_inversion = exact_inversion
         self.gn_momentum = gn_momentum
         self.tikhonov_period = tikhonov_period
+        self.debug = debug
 
     def __call__(self, loss_layer,
                  l2_reg=None,
@@ -156,11 +161,14 @@ class Optimizer(object):
                 return theano.shared(np.random.standard_normal(value.shape).astype(value.dtype) / 100,
                                      name=param.name + "_kf_momentum",
                                      broadcastable=param.broadcastable)
-
+            if self.debug:
+                print("Applying GN momentum.")
             velocities = [make_velocity(p) for p in params]
             steps = self.gn_rescale(gauss_newton_product, grads, initial_steps, velocities)
         # If rescaling by the true Gauss-Newton
         elif self.rescale_by_gn:
+            if self.debug:
+                print("Rescaling by the Gauss-Newton matrix.")
             steps = self.gn_rescale(gauss_newton_product, grads, initial_steps)
         # Else use your standard updates
         else:
@@ -168,12 +176,21 @@ class Optimizer(object):
 
         # Apply clipping
         if self.clipping is not None:
+            if self.debug:
+                print("Applying clipping.")
             steps = self.clipping(steps, grads)
 
         # Generate final updates
         updates = self.update_function(steps, params, self.learning_rate)
 
         # Add all extra updates from SKFGN
+        if self.debug:
+            print("Standard parameters' updates:")
+            for p, v in updates.items():
+                print(p.name, p.get_value().shape, ":=", v)
+            print("Extra updates:")
+            for u, v in extra_updates.items():
+                print(u.name, u.get_value().shape, ":=", v)
         # updates.update(extra_updates)
         for u, v in extra_updates.items():
             assert updates.get(u) is None
@@ -199,6 +216,8 @@ class Optimizer(object):
                                              mirror=True)
                         updates[mirror] = b * mirror + (1 - b) * updates[w]
                         mirror_map[w] = mirror
+                        if self.debug:
+                            print("Adding", mirror.name, "to updates and mirror map.")
                         continue
         # Just retain the original parameters
         else:
@@ -233,8 +252,11 @@ class Optimizer(object):
         # Start from the loss layer
         curvature_map[loss_layer] = [loss_grad]
         all_layers = get_all_layers(loss_layer, treat_as_input)
+        if self.debug:
+            print("Performing SKFGN backprop")
         for layer in reversed(all_layers):
-            print(layer.name)
+            if self.debug:
+                print(layer.name)
             if isinstance(layer, InputLayer):
                 input_curvature[layer] = curvature_map[layer]
                 continue

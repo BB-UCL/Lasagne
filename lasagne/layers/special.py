@@ -4,7 +4,7 @@ import numpy as np
 
 from .. import init
 from .. import nonlinearities
-from ..utils import as_tuple, floatX
+from ..utils import as_tuple, floatX, th_fx
 from ..random import get_rng
 from .base import Layer
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
@@ -50,6 +50,18 @@ class NonlinearityLayer(Layer):
 
     def get_outputs_for(self, inputs, **kwargs):
         return self.nonlinearity(inputs[0]),
+
+    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+        assert len(inputs) == 1
+        assert len(curvature) == 1
+        assert len(outputs) == 1
+
+        if optimizer.variant == "kfra":
+            n = th_fx(inputs[0].shape[0])
+            a = T.Lop(outputs[0], inputs[0], T.ones_like(outputs[0]))
+            return curvature * T.dot(a.T, a) / n,
+        else:
+            return T.Lop(outputs[0], inputs[0], curvature[0]),
 
 
 class BiasLayer(Layer):
