@@ -63,6 +63,8 @@ class GaussianSampleLayer(Layer):
         mu = x[:, :d]
         sigma = x[:, d:]
         epsilon = th_normal((n, self.num_samples, d))
+        # from theano.gradient import zero_grad
+        # epsilon = zero_grad(T.ones((n, self.num_samples, d)))
         samples = mu.dimshuffle(0, 'x', 1) + sigma.dimshuffle(0, 'x', 1) * epsilon
         return T.reshape(samples, (n * self.num_samples, d)),
 

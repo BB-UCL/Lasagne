@@ -305,18 +305,19 @@ class Optimizer(object):
 
     def kronecker_inversion(self, layer, w, q, g, grad, steps_map, t, updates):
         b = None
+        name = w.name.split(utils.SCOPE_DELIMITER)[-1]
         if isinstance(w, (tuple, list)):
             assert len(w) == 2
             assert len(grad) == 2
             w, b = w
             grad = T.concatenate((grad[0], grad[1].reshape((1, -1))), axis=0)
+            name += "_fused"
         if w.ndim != 2:
             raise ValueError("Currently SKFGN is implemented only for matrix parameters."
                              "Try absorbing the bias in the weight matrix via 'fused_bias=True'")
         q_dim, g_dim = w.shape.eval()
         if b is not None:
             q_dim += 1
-        name = w.name.split(utils.SCOPE_DELIMITER)[-1]
 
         # Curvature smoothing/momentum
         if self.curvature_avg > 0:
