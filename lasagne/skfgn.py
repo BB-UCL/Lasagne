@@ -200,7 +200,7 @@ class Optimizer(object):
         mirror_map = dict()
         # For each parameter create a smoothed mirroring parameter
         if self.mirror_avg > 0:
-            b = self.get_b(self.mirror_avg, t)
+            gamma = self.get_gamma(self.mirror_avg, t)
             all_layers = get_all_layers(loss_layer)
             for w in params:
                 for l in all_layers:
@@ -214,7 +214,7 @@ class Optimizer(object):
                                              trainable=False,
                                              regularizable=False,
                                              mirror=True)
-                        updates[mirror] = b * mirror + (1 - b) * updates[w]
+                        updates[mirror] = gamma * mirror + (1 - gamma) * updates[w]
                         mirror_map[w] = mirror
                         if self.debug:
                             print("Adding", mirror.name, "to updates and mirror map.")
@@ -245,8 +245,12 @@ class Optimizer(object):
         extra_updates[t] = t + 1
         t = utils.th_fx(extra_updates[t])
 
-        def kronecker_inversion(owning_layer, param, q, g):
-            self.kronecker_inversion(owning_layer, param, q, g, grads_map[param],
+        def kronecker_inversion(owning_layer, params, q, g):
+            if isinstance(params, (list, tuple)):
+                grads = [grads_map[p] for p in params]
+            else:
+                grads = grads_map[params]
+            self.kronecker_inversion(owning_layer, params, q, g, grads,
                                      steps_map,  t, extra_updates)
 
         # Start from the loss layer
@@ -300,10 +304,18 @@ class Optimizer(object):
         return steps, extra_updates, t
 
     def kronecker_inversion(self, layer, w, q, g, grad, steps_map, t, updates):
+        b = None
+        if isinstance(w, (tuple, list)):
+            assert len(w) == 2
+            assert len(grad) == 2
+            w, b = w
+            grad = T.concatenate((grad[0], grad[1].reshape((1, -1))), axis=0)
         if w.ndim != 2:
             raise ValueError("Currently SKFGN is implemented only for matrix parameters."
                              "Try absorbing the bias in the weight matrix via 'fused_bias=True'")
         q_dim, g_dim = w.shape.eval()
+        if b is not None:
+            q_dim += 1
         name = w.name.split(utils.SCOPE_DELIMITER)[-1]
 
         # Curvature smoothing/momentum
@@ -323,10 +335,10 @@ class Optimizer(object):
                                     regularizable=False,
                                     skfgn=True)
             # Linearly increasing moving average parameter for the first `avg_init_period` iterations
-            b = self.get_b(self.curvature_avg, t)
+            gamma = self.get_gamma(self.curvature_avg, t)
             # The smoothed curvature matrices
-            q = b * q_avg + (1 - b) * q
-            g = b * g_avg + (1 - b) * g
+            q = gamma * q_avg + (1 - gamma) * q
+            g = gamma * g_avg + (1 - gamma) * g
             # Add smoothed curvature matrices to updates
             updates[q_avg] = q
             updates[g_avg] = g
@@ -340,8 +352,8 @@ class Optimizer(object):
                                        trainable=False,
                                        regularizable=False,
                                        stats=True)
-            b = self.get_b(self.grad_avg, t)
-            grad = b * grad_avg + (1 - b) * grad
+            gamma = self.get_gamma(self.grad_avg, t)
+            grad = gamma * grad_avg + (1 - gamma) * grad
             updates[grad_avg] = grad
 
         if q_dim == 0 and g_dim == 0:
@@ -361,7 +373,11 @@ class Optimizer(object):
             g += T.eye(g_dim) * T.sqrt(self.tikhonov_damping) / omega
             step = utils.linear_solve(q, grad, "symmetric")
             step = utils.linear_solve(g, step.T, "symmetric").T
-        steps_map[w] = step
+        if b is None:
+            steps_map[w] = step
+        else:
+            steps_map[w] = step[:-1]
+            steps_map[b] = step[-1]
 
     def gn_rescale(self, gauss_newton_product, grads, steps1, steps2=None):
         # The second order Taylor expansion of f(x) gives us:
@@ -435,7 +451,7 @@ class Optimizer(object):
             add_to_report("kf_reduction", reduction)
             return [step_1 * alpha_1 + step_2 * alpha_2 for step_1, step_2 in zip(steps1, steps2)]
 
-    def get_b(self, mu, t):
+    def get_gamma(self, mu, t):
         c = mu / (self.avg_init_period - 1)
         return T.minimum(mu, t * (self.curvature_avg - c) / self.avg_init_period + c)
 

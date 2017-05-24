@@ -106,22 +106,26 @@ class DenseLayer(Layer):
                 (self.input_shape, self.num_leading_axes))
         num_inputs = int(np.prod(self.input_shape[num_leading_axes:]))
 
-        if fused_bias:
-            self.W = self.add_param(W, (num_inputs + 1, num_units), name="W",
+        if b is None:
+            self.W = self.add_param(W, (num_inputs, num_units), name="W",
                                     broadcast_unit_dims=False)
-            b_val = b.sample((1, num_units))
-            w_val = self.W.get_value()
-            w_val[-1] = b_val
-            self.W.set_value(w_val)
             self.b = None
+            self.W_fused = None
+        elif fused_bias:
+            self.W_fused = self.add_param(W, (num_inputs + 1, num_units), name="W_fused",
+                                          broadcast_unit_dims=False)
+            b_val = b.sample((1, num_units))
+            w_val = self.W_fused.get_value()
+            w_val[-1] = b_val
+            self.W_fused.set_value(w_val)
+            self.W = self.W_fused[:-1]
+            self.b = self.W_fused[-1]
         else:
             self.W = self.add_param(W, (num_inputs, num_units), name="W",
                                     broadcast_unit_dims=False)
-            if b is None:
-                self.b = None
-            else:
-                self.b = self.add_param(b, (num_units,), name="b",
-                                        regularizable=False)
+            self.b = self.add_param(b, (num_units,), name="b",
+                                    regularizable=False)
+            self.W_fused = T.concatenate((self.W, self.b.reshape((1, -1))), axis=0)
 
     def get_output_shapes_for(self, input_shapes):
         input_shape = input_shapes[0]
@@ -136,11 +140,13 @@ class DenseLayer(Layer):
             # flatten trailing axes (into (n+1)-tensor for num_leading_axes=n)
             x = x.flatten(num_leading_axes + 1)
 
-        if self.fused_bias:
+        if self.b is None:
+            activation = T.dot(x, self.W)
+        elif self.fused_bias:
             x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
-        activation = T.dot(x, self.W)
-        if self.b is not None:
-            activation = activation + self.b
+            activation = T.dot(x, self.W_fused)
+        else:
+            activation = T.dot(x, self.W) + self.b.dimshuffle('x', 0)
         return self.nonlinearity(activation),
 
     def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
@@ -148,37 +154,43 @@ class DenseLayer(Layer):
         assert len(curvature) == 1
         assert len(outputs) == 1
 
-        # Propagates the curvature trough the nonlinearity layer
-        path = dfs_path(outputs[0], self.W)
-        if self.b is None:
+        # Extract the activation of the layer
+        if self.b is None or self.fused_bias:
+            path = dfs_path(outputs[0], self.W_fused)
             activation = path[-2]
         else:
+            path = dfs_path(outputs[0], self.W)
             activation = path[-3]
+        # Extract info and calculate Q
         x = inputs[0]
         curvature = curvature[0]
         x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
         n = th_fx(x.shape[0])
         q = T.dot(x.T, x) / n
         if optimizer.variant == "kfra":
-            if self.fused_bias:
-                if self.nonlinearity != nonlinearities.identity:
-                    a = T.Lop(outputs[0], activation, T.ones_like(outputs[0]))
-                    g = curvature * T.dot(a.T, a) / n
-                else:
-                    g = curvature
-                kronecker_inversion(self, self.W, q, g)
-                return T.dot(T.dot(self.W[:-1], g), self.W[:-1].T),
+            # Propagate curvature trough the nonlinearity and calculate the activation GN
+            if self.nonlinearity != nonlinearities.identity:
+                a = T.Lop(outputs[0], activation, T.ones_like(outputs[0]))
+                g = curvature * T.dot(a.T, a) / n
             else:
-                raise NotImplementedError
+                g = curvature
+            if self.b is None or self.fused_bias:
+                # In this cases it is simple
+                kronecker_inversion(self, self.W_fused, q, g)
+            else:
+                kronecker_inversion(self, (self.W, self.b), q, g)
+            return T.dot(T.dot(self.W, g), self.W.T),
         else:
-            if self.fused_bias:
-                if self.nonlinearity != nonlinearities.identity:
-                    curvature = T.Lop(outputs[0], activation, curvature)
-                g = T.dot(curvature.T, curvature) / n
-                kronecker_inversion(self, self.W, q, g)
-                return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
+            # Propagate curvature trough the nonlinearity and calculate the activation GN
+            if self.nonlinearity != nonlinearities.identity:
+                curvature = T.Lop(outputs[0], activation, curvature)
+            g = T.dot(curvature.T, curvature) / n
+            if self.b is None or self.fused_bias:
+                # In this cases it is simple
+                kronecker_inversion(self, self.W_fused, q, g)
             else:
-                raise NotImplementedError
+                kronecker_inversion(self, (self.W, self.b), q, g)
+            return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
 
 
 class NINLayer(Layer):
