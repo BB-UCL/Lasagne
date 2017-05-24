@@ -41,38 +41,72 @@ def set_rng(new_rng):
     _rng = new_rng
 
 
+def get_symbolic_shape_ndim(shape):
+    try:
+        _, = shape
+        return 1
+    except ValueError:
+        pass
+    try:
+        _, _ = shape
+        return 2
+    except ValueError:
+        pass
+    try:
+        _, _, _ = shape
+        return 3
+    except ValueError:
+        pass
+    try:
+        _, _, _, _ = shape
+        return 4
+    except ValueError:
+        pass
+    raise ValueError("Something went wrong")
+
+
 def multi_sampler(sampler):
     @wraps(sampler)
     def sample(shapes, *args, **kwargs):
-        if (isinstance(shapes[0], T.TensorVariable) and
-                shapes[0].ndim == 0) or \
-                (not isinstance(shapes[0], (list, tuple))):
+        # Shapes can be either a single shape or a list of shapes
+        if isinstance(shapes[0], T.TensorVariable):
+            # First entry is a symbolic expression
+            if shapes[0].ndim == 0:
+                # Single shape
+                return sampler(shapes, *args, **kwargs)
+            else:
+                # Multiple shapes
+                ndim = get_symbolic_shape_ndim(shapes[0])
+        elif isinstance(shapes[0], int):
+            # Single shape
             return sampler(shapes, *args, **kwargs)
+        elif isinstance(shapes[0], (list, tuple, np.ndarray)):
+            # Multiple shapes
+            ndim = len(shapes[0])
         else:
-            if isinstance(shapes[0], (list, tuple)):
-                ndim = len(shapes[0])
+            raise ValueError("Incorrect shapes input - {}".format(shapes))
+        # Code for multiple shapes
+        for s in shapes:
+            if isinstance(s, (list, tuple, np.ndarray)):
+                assert ndim == len(s)
             else:
-                ndim = shapes[0].ndim
-            for s in shapes:
-                if isinstance(s, (list, tuple)):
-                    assert ndim == len(s)
-                else:
-                    assert ndim == s.ndim
-            n = sum(s[0] for s in shapes)
-            if ndim == 1:
-                all_shape = (n, )
-            elif ndim == 2:
-                all_shape = (n, shapes[0][1])
-            elif ndim == 3:
-                all_shape = (n, shapes[0][1], shapes[0][2])
-            else:
-                all_shape = (n, shapes[0][1], shapes[0][2], shapes[0][3])
-            samples = sampler(all_shape, *args, **kwargs)
-            n = 0
-            split = []
-            for s in shapes:
-                split.append(samples[n:n + s[0]])
-            return split
+                assert ndim == get_symbolic_shape_ndim(s)
+        n = sum(s[0] for s in shapes)
+        if ndim == 1:
+            all_shape = (n, )
+        elif ndim == 2:
+            all_shape = (n, shapes[0][1])
+        elif ndim == 3:
+            all_shape = (n, shapes[0][1], shapes[0][2])
+        else:
+            all_shape = (n, shapes[0][1], shapes[0][2], shapes[0][3])
+        samples = sampler(all_shape, *args, **kwargs)
+        n = 0
+        split = []
+        for s in shapes:
+            split.append(samples[n:n + s[0]])
+            n += s[0]
+        return split
     return sample
 
 
