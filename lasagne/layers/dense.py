@@ -169,8 +169,8 @@ class DenseLayer(Layer):
         if self.b is not None and not self.fused_bias:
             index += 1
         activation = path[index]
-        if optimizer.debug:
-            print("Actibation:", activation, index, path)
+        # if optimizer.debug:
+        #     print("Actibation:", activation, index, path)
         # Extract info and calculate Q
         x = inputs[0]
         curvature = curvature[0]

@@ -148,9 +148,13 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
         x = utils.expand_variable(x, self.repeats[0])
         y = utils.expand_variable(y, self.repeats[1])
         p_x = T.nnet.sigmoid(x)
+        # Calculate loss
         bce = T.nnet.binary_crossentropy(p_x, y)
+        # Flatten
         bce = T.flatten(bce, outdim=2)
-        return T.sum(bce, axis=1),
+        # Calculat per data point
+        bce = T.sum(bce, axis=1)
+        return bce,
 
     def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
         x, y = inputs
@@ -264,10 +268,12 @@ class GaussianKL(SKFGNLossLayer):
         # Log determinant of p_sigma
         kl += 2 * T.log(p_sigma)
         # Log determinant of q_sigma
-        kl -= 2 * T.log(p_sigma)
+        kl -= 2 * T.log(q_sigma)
         # Flatten
         kl = T.flatten(kl, outdim=2)
-        return 0.5 * T.sum(kl, axis=1),
+        # Calculate per data point
+        kl = 0.5 * T.sum(kl, axis=1)
+        return kl,
 
     def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
         assert len(curvature) == 1
