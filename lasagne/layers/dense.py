@@ -157,10 +157,20 @@ class DenseLayer(Layer):
         # Extract the activation of the layer
         if self.b is None or self.fused_bias:
             path = dfs_path(outputs[0], self.W_fused)
-            activation = path[-2]
         else:
             path = dfs_path(outputs[0], self.W)
-            activation = path[-3]
+        index = None
+        for i in reversed(range(len(path))):
+            if path[i].owner is not None and isinstance(path[i].owner.op, T.basic.Dot):
+                index = i
+                break
+        if index is None:
+            raise ValueError("Did not manage to find Dot?")
+        if self.b is not None and not self.fused_bias:
+            index += 1
+        activation = path[index]
+        # if optimizer.debug:
+        #     print("Actibation:", activation, index, path)
         # Extract info and calculate Q
         x = inputs[0]
         curvature = curvature[0]
@@ -190,7 +200,7 @@ class DenseLayer(Layer):
                 kronecker_inversion(self, self.W_fused, q, g)
             else:
                 kronecker_inversion(self, (self.W, self.b), q, g)
-            return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
+            return T.Lop(outputs[0], inputs[0], curvature),
 
 
 class NINLayer(Layer):
