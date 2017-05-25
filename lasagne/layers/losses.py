@@ -130,7 +130,7 @@ class SquareLoss(SKFGNLossLayer):
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
         x, y = inputs_map[self]
-        return utils.gauss_newton_product(x, 1, params, v1, v2)
+        return utils.gauss_newton_product(x, T.constant(1), params, v1, v2)
 
 
 class BinaryLogitsCrossEntropy(SKFGNLossLayer):
@@ -342,15 +342,18 @@ class GaussianKL(SKFGNLossLayer):
             q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, True)
             if self.state == 1 or self.state == 2:
                 # Q
-                g_q_mu = T.mean(T.inv(T.sqr(p_sigma)), axis=0)
+                if self.state == 1:
+                    g_q_mu = T.mean(T.inv(T.sqr(p_sigma)), axis=0)
+                else:
+                    g_q_mu = T.ones(q_sigma.shape[1:])
                 g_q_sigma = T.mean(T.inv(T.sqr(p_sigma)) + T.inv(T.sqr(q_sigma)), axis=0)
-                g_q = T.diag(T.concatenate((g_q_mu, g_q_sigma)))
+                g_q = T.diag(T.concatenate((g_q_mu, g_q_sigma), axis=0))
                 g_q *= curvature
             if self.state == 1 or self.state == 3:
                 # P
                 g_p_mu = T.mean(T.inv(p_sigma), axis=0)
                 g_p_sigma = 2 * g_p_mu
-                g_p = T.diag(T.concatenate((g_p_mu, g_p_sigma)))
+                g_p = T.diag(T.concatenate((g_p_mu, g_p_sigma), axis=0))
                 g_p *= curvature
         else:
             raise ValueError("Unreachable!")
