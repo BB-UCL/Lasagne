@@ -213,13 +213,14 @@ class Optimizer(object):
         # For each parameter create a smoothed mirroring parameter
         if self.mirror_avg > 0:
             gamma = self.get_gamma(self.mirror_avg, t)
+            # gamma = utils.theano_print_values(gamma, "gamma")
             all_layers = get_all_layers(loss_layer)
             for w in params:
                 for l in all_layers:
                     if w in l.params:
                         name = w.name.split(utils.SCOPE_DELIMITER)[-1]
                         shape = w.shape.eval()
-                        mirror = l.add_param(utils.floatX(np.zeros(shape)),
+                        mirror = l.add_param(w.get_value(),
                                              shape,
                                              name=name + "_mirror",
                                              broadcast_unit_dims=False,
