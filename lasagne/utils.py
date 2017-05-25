@@ -758,7 +758,7 @@ def gauss_newton_product(outputs, outputs_hess, params, v1, v2=None):
     -------
     The expected value of the product with the Generalized Gauss-Newton matrix.
     """
-    assert outputs_hess.ndim == 2
+    assert outputs_hess.ndim == 2 or outputs_hess.ndim == 0
     Jv1 = T.Rop(outputs, params, v1)
     Jv2 = T.Rop(outputs, params, v2) if v2 else Jv1
     return T.mean(T.sum(Jv1 * Jv2 * outputs_hess, axis=1))
