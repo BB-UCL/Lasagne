@@ -133,7 +133,7 @@ class Optimizer(object):
                  return_loss=True):
         # Get parameters
         if params is None:
-            params = get_all_params(loss_layer, params)
+            params = get_all_params(loss_layer, trainable=True)
 
         # Get the output of the loss layer as well as the input and output map for all layers
         loss_out, inputs_map, outputs_map = get_output(loss_layer, get_maps=True)
