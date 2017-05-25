@@ -11,6 +11,7 @@ import theano
 import theano.tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from theano.gradient import zero_grad
+from .utils import th_fx
 
 _rng = np.random
 
@@ -169,6 +170,16 @@ def th_normal(shape, mean=0, std=1, dtype=None):
         samples *= std
     if mean != 0:
         samples += mean
+    return samples
+
+
+@multi_sampler
+def th_multinomial(shape, n=1, dtype=None):
+    srng = RandomStreams(get_rng().randint(1, 2147462579))
+    pvals = T.ones(shape, dtype=theano.config.floatX) / th_fx(shape[1])
+    samples = srng.multinomial(pvals=pvals, n=n)
+    if dtype is not None:
+        samples = T.cast(samples, dtype)
     return samples
 
 

@@ -1,6 +1,6 @@
 import lasagne.layers as L
 import numpy as np
-from lasagne.skfgn import Optimizer
+from lasagne.skfgn import optimizer_from_dict
 from lasagne.nonlinearities import tanh, identity
 import theano
 from bb_datasets import get_dataset
@@ -52,7 +52,11 @@ def main(dataset="mnist", batch_size=1000, epochs=20):
         raise ValueError("Unrecognized dataset:", dataset)
     arch = (input_dim, 1000, 500, 250, 50)
     in_vars, l_loss = autoencoder(arch, binary=binary)
-    optimizer = Optimizer(variant="skfgn-rp", curvature_avg=0.9, mirror_avg=0.9)
+    optim_args = {"variant": "skfgn-rp",
+                  "curvature_avg": 0.9,
+                  "mirror_avg": 0.9,
+                  "random_sampler": "index"}
+    optimizer = optimizer_from_dict(optim_args)
     updates, mirror_map, loss = optimizer(l_loss)
     train_f = theano.function(in_vars, loss, updates=updates)
 
