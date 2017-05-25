@@ -12,6 +12,9 @@ from .layers import InputLayer
 from .reporting import add_to_report
 
 
+VARIANTS = ("skfgn-rp", "skfgn-fisher", "kfac*", "kfra")
+
+
 class Optimizer(object):
     def __init__(self,
                  variant="skfgn-rp",
@@ -37,7 +40,6 @@ class Optimizer(object):
             One of:
                 1. "skfgn-rp" - SKFGN-RP
                 2. "skfgn-fisher" - SKFGN-Fisher
-                3. "skfgn-i" - SKFGN-Index
                 4. "kfac*" - KFAC*
                 5. "kfra" - KFRA
                 
@@ -93,8 +95,9 @@ class Optimizer(object):
         :param: debug: bool (defualt False)
             Whether to print debug info when performing SKFGN
         """
-        assert variant in ("skfgn-rp", "skfgn-fisher", "skfgn-i", "kfac*", "kfra")
-        self.variant = variant
+        if variant not in VARIANTS:
+            raise ValueError("Variant must be one of {}".format(str(VARIANTS)))
+        self.__variant = variant
         self.random_sampler = random_sampler
         self.norm = norm
         self.tikhonov_damping = tikhonov_damping
@@ -111,6 +114,15 @@ class Optimizer(object):
         self.gn_momentum = gn_momentum
         self.tikhonov_period = tikhonov_period
         self.debug = debug
+
+    @property
+    def variant(self):
+        return self.__variant
+
+    @variant.setter
+    def variant(self, value):
+        if value not in VARIANTS:
+            raise ValueError("Variant must be one of {}".format(str(VARIANTS)))
 
     def __call__(self, loss_layer,
                  l2_reg=None,
@@ -532,6 +544,13 @@ def optimizer_from_dict(primitive_dict):
         elif name == "ball":
             def sample(shapes):
                 return random.th_uniform_ball(shapes)
+        elif name == "index":
+            def sample(shapes):
+                samples = random.th_multinomial(shapes, dtype=theano.config.floatX)
+                if isinstance(samples, (list, tuple)):
+                    return [s * T.sqrt(utils.th_fx(shapes[0][1])) for s in samples]
+                else:
+                    return samples * T.sqrt(utils.th_fx(shapes[1]))
         else:
             raise ValueError("Unrecognized 'random_sampler'=", name)
         primitive_dict["random_sampler"] = sample

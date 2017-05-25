@@ -115,8 +115,8 @@ class SquareLoss(SKFGNLossLayer):
             fake_dx = th_normal(x.shape)
             fake_dx *= T.sqrt(weight)
             return fake_dx, None
-        elif optimizer.variant == "skfgn-i":
-            raise NotImplementedError
+        # elif optimizer.variant == "skfgn-i":
+        #     raise NotImplementedError
         elif optimizer.variant == "kfra":
             if x.ndim == 1:
                 gn_x = T.sqrt(weight)
@@ -126,7 +126,7 @@ class SquareLoss(SKFGNLossLayer):
                 gn_x *= T.sqrt(weight)
             return gn_x, None
         else:
-            raise ValueError("Unreachable")
+            raise ValueError("Unreachable!")
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
         x, y = inputs_map[self]
@@ -170,8 +170,8 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
             fake_dx = p_x - utils.th_fx(th_binary(x.shape, p=p_x))
             fake_dx *= T.sqrt(weight)
             return fake_dx, None
-        elif optimizer.variant == "skfgn-i":
-            raise NotImplementedError
+        # elif optimizer.variant == "skfgn-i":
+        #     raise NotImplementedError
         elif optimizer.variant == "kfra":
             if x.ndim == 1:
                 gn_x = T.diag(p_x * (1 - p_x))
@@ -181,7 +181,7 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
             gn_x *= T.sqrt(weight)
             return gn_x, None
         else:
-            raise ValueError("Unreachable")
+            raise ValueError("Unreachable!")
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
         x, y = inputs_map[self]
@@ -336,8 +336,8 @@ class GaussianKL(SKFGNLossLayer):
                 d_p_sigma = (fake_p - 1) / p_sigma
                 d_p = T.concatenate((d_p_mu, d_p_sigma), axis=1)
                 g_p = d_p * T.sqrt(curvature)
-        elif optimizer.variant == "skfgn-i":
-            raise NotImplementedError
+        # elif optimizer.variant == "skfgn-i":
+        #     raise NotImplementedError
         elif optimizer.variant == "kfra":
             q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, True)
             if self.state == 1 or self.state == 2:
@@ -353,7 +353,7 @@ class GaussianKL(SKFGNLossLayer):
                 g_p = T.diag(T.concatenate((g_p_mu, g_p_sigma)))
                 g_p *= curvature
         else:
-            raise ValueError("Unreachable")
+            raise ValueError("Unreachable!")
         if self.state == 1:
             return g_q, g_p
         elif self.state == 2:

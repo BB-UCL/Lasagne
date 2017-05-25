@@ -891,3 +891,42 @@ def dfs_path(f, w):
                 new_path = list(path) + [child]
                 queue.append(new_path)
     raise ValueError("Did not find the variable {} in the graph.".format(str(w)))
+
+
+def set_parameters(params, value_mapping, verbose=True):
+    """
+    Sets the values of the Theano shared variables parameters
+    if they or their names are in the value_mapping.
+
+    Parameters
+    ----------
+
+    params : Iterable over Theano shared variables
+        The parameters whose values to set.
+
+    value_mapping : dict
+        A dictionary mapping either the parameters or their names to
+        values to set.
+        
+    verbose: bool
+        Whether to print info for each parameter.
+
+    Returns
+    -------
+    """
+    for p in params:
+        if value_mapping.get(p) is not None:
+            value = value_mapping[p]
+            assert np.alltrue(value.shape == p.get_value().shape)
+            if verbose:
+                print("Setting parameter", p.name, "with shape", value.shape)
+            p.set_value(value)
+        elif value_mapping.get(p.name) is not None:
+            value = value_mapping[p]
+            assert np.alltrue(value.shape == p.get_value().shape)
+            if verbose:
+                print("Setting parameter", p.name, "with shape", value.shape)
+            p.set_value(value)
+        else:
+            if verbose:
+                print("Skipping parameter", p.name)
