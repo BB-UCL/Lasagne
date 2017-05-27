@@ -18,7 +18,7 @@ VARIANTS = ("skfgn-rp", "skfgn-fisher", "kfac*", "kfra")
 class Optimizer(object):
     def __init__(self,
                  variant="skfgn-rp",
-                 random_sampler=random.th_uniform_ball,
+                 random_sampler=random.uniform_ball,
                  norm=utils.mean_trace_norm,
                  tikhonov_damping=1e-3,
                  rescale_by_gn=True,
@@ -533,21 +533,21 @@ def optimizer_from_dict(primitive_dict):
         name = primitive_dict["random_sampler"]
         if name == "normal":
             def sample(shapes):
-                return random.th_normal(shapes)
+                return random.normal(shapes)
         elif name == "binary":
             def sample(shapes):
-                return random.th_binary(shapes, v0=-1)
+                return random.binary(shapes, v0=-1)
         elif name == "uniform":
             sqrt3 = utils.th_fx(T.constant(np.sqrt(3)))
 
             def sample(shapes):
-                return random.th_uniform(shapes, min=-sqrt3, max=sqrt3)
+                return random.uniform(shapes, min=-sqrt3, max=sqrt3)
         elif name == "ball":
             def sample(shapes):
-                return random.th_uniform_ball(shapes)
+                return random.uniform_ball(shapes)
         elif name == "index":
             def sample(shapes):
-                samples = random.th_multinomial(shapes, dtype=theano.config.floatX)
+                samples = random.multinomial(shapes, dtype=theano.config.floatX)
                 if isinstance(samples, (list, tuple)):
                     return [s * T.sqrt(utils.th_fx(shapes[0][1])) for s in samples]
                 else:

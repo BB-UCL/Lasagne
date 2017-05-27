@@ -4,7 +4,7 @@ import theano.tensor as T
 from .base import Layer
 from ..nonlinearities import softplus
 from ..utils import th_fx
-from ..random import th_normal
+from ..random import normal
 
 
 class GaussianParametersLayer(Layer):
@@ -62,7 +62,7 @@ class GaussianSampleLayer(Layer):
         d = T.int_div(x.shape[1], 2)
         mu = x[:, :d]
         sigma = x[:, d:]
-        epsilon = th_normal((n, self.num_samples, d))
+        epsilon = normal((n, self.num_samples, d))
         # from theano.gradient import zero_grad
         # epsilon = zero_grad(T.ones((n, self.num_samples, d)))
         samples = mu.dimshuffle(0, 'x', 1) + sigma.dimshuffle(0, 'x', 1) * epsilon

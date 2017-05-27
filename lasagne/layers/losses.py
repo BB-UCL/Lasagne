@@ -2,7 +2,7 @@ import theano.tensor as T
 
 from .. import utils
 from ..layers import Layer
-from ..random import th_normal, th_binary
+from ..random import normal, binary
 
 __all__ = [
     "SKFGNLossLayer",
@@ -112,7 +112,7 @@ class SquareLoss(SKFGNLossLayer):
             cl_v *= T.sqrt(weight)
             return cl_v, None
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
-            fake_dx = th_normal(x.shape)
+            fake_dx = normal(x.shape)
             fake_dx *= T.sqrt(weight)
             return fake_dx, None
         # elif optimizer.variant == "skfgn-i":
@@ -167,7 +167,7 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
             cl_v *= T.sqrt(weight)
             return cl_v, None
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
-            fake_dx = p_x - utils.th_fx(th_binary(x.shape, p=p_x))
+            fake_dx = p_x - utils.th_fx(binary(x.shape, p=p_x))
             fake_dx *= T.sqrt(weight)
             return fake_dx, None
         # elif optimizer.variant == "skfgn-i":
@@ -314,12 +314,12 @@ class GaussianKL(SKFGNLossLayer):
             q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, False)
             # Samples
             if self.state == 1:
-                fake_q, fake_p = th_normal((q_mu.shape, p_mu.shape))
+                fake_q, fake_p = normal((q_mu.shape, p_mu.shape))
             elif self.state == 2:
-                fake_q = th_normal(q_mu.shape)
+                fake_q = normal(q_mu.shape)
                 fake_p = None
             elif self.state == 3:
-                fake_p = th_normal(p_mu.shape)
+                fake_p = normal(p_mu.shape)
                 fake_q = None
             else:
                 raise NotImplementedError

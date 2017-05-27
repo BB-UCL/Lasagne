@@ -31,7 +31,8 @@ def get_rng():
 
 
 def set_rng(new_rng):
-    """Set the package-level random number generator.
+    """
+    Set the package-level random number generator.
 
     Parameters
     ----------
@@ -43,6 +44,18 @@ def set_rng(new_rng):
 
 
 def get_symbolic_shape_ndim(shape):
+    """
+    Returns the number of dimension of a result of `theano.tensor.shape`
+
+    Parameters
+    ----------
+    shape : Theano expression
+        This needs to be the result of `theano.tensor.shape`
+
+    Returns
+    ----------
+    The number of dimensions of the shape.
+    """
     try:
         _, = shape
         return 1
@@ -67,6 +80,19 @@ def get_symbolic_shape_ndim(shape):
 
 
 def multi_sampler(sampler):
+    """
+    Wraps a standard sampling method to be able to take as input
+    multiple shapes.
+
+    Parameters
+    ----------
+    sampler : The sampling method
+
+    Returns
+    ----------
+    A sampling method equivalent to the input, but allowing to pass
+    multiple shapes
+    """
     @wraps(sampler)
     def sample(shapes, *args, **kwargs):
         # Shapes can be either a single shape or a list of shapes
@@ -112,7 +138,7 @@ def multi_sampler(sampler):
 
 
 @multi_sampler
-def th_uniform(shape, min=0, max=1, dtype=None):
+def uniform(shape, min=0, max=1, dtype=None, random=None):
     """
     Draws a symbolic sample from the uniform hypercube.
 
@@ -126,14 +152,16 @@ def th_uniform(shape, min=0, max=1, dtype=None):
         Upper bound of the uniform distribution. Defaults to 1.
     dtype: numpy data-type, optional
         The desired dtype of the sample. Defaults to ``floatX``.
+    random: Theano RandomStreams or None
+        An optional RandomStreams to be used for sampling.
 
     Returns
     -------
         A Theano variable that contains a sample from the uniform hypercube.
     """
     dtype = dtype or theano.config.floatX
-    srng = RandomStreams(get_rng().randint(1, 2147462579))
-    samples = srng.uniform(shape, dtype=dtype)
+    random = random or RandomStreams(get_rng().randint(1, 2147462579))
+    samples = random.uniform(shape, dtype=dtype)
     samples = zero_grad(samples)
     if min != 0 or max != 1:
         samples *= (max - min)
@@ -142,7 +170,7 @@ def th_uniform(shape, min=0, max=1, dtype=None):
 
 
 @multi_sampler
-def th_normal(shape, mean=0, std=1, dtype=None):
+def normal(shape, mean=0, std=1, dtype=None, random=None):
     """
     Draws a symbolic sample from a Gaussian distribution.
 
@@ -156,7 +184,8 @@ def th_normal(shape, mean=0, std=1, dtype=None):
         Standard deviation of the sample.
     dtype: numpy data-type, optional
         The desired dtype of the sample. Defaults to ``floatX``.
-
+    random: Theano RandomStreams or None
+        An optional RandomStreams to be used for sampling.
 
     Returns
     -------
@@ -164,8 +193,8 @@ def th_normal(shape, mean=0, std=1, dtype=None):
         distribution.
     """
     dtype = dtype or theano.config.floatX
-    srng = RandomStreams(get_rng().randint(1, 2147462579))
-    samples = srng.normal(shape, dtype=dtype)
+    random = random or RandomStreams(get_rng().randint(1, 2147462579))
+    samples = random.normal(shape, dtype=dtype)
     samples = zero_grad(samples)
     if std != 1:
         samples *= std
@@ -175,17 +204,36 @@ def th_normal(shape, mean=0, std=1, dtype=None):
 
 
 @multi_sampler
-def th_multinomial(shape, n=1, dtype=None):
-    srng = RandomStreams(get_rng().randint(1, 2147462579))
-    pvals = T.ones(shape, dtype=theano.config.floatX) / th_fx(shape[1])
-    samples = srng.multinomial(pvals=pvals, n=n)
-    if dtype is not None:
-        samples = T.cast(samples, dtype)
+def multinomial(shape, n=1, pvals=None, dtype=None, random=None):
+    """
+     Draws a symbolic sample from a Multinomial distribution.
+
+     Parameters
+     ----------
+     shape: sequence of int or theano shape, can be symbolic
+         Shape of the sample.
+     n: int
+         Sample `n` times from a multinomial distribution defined by pvals.
+     pvals: vector or None
+         The distribution to sample from. If None samples uniformly.
+     dtype: numpy data-type, optional
+         The desired dtype of the sample. Defaults to ``floatX``.
+     random: Theano RandomStreams or None
+         An optional RandomStreams to be used for sampling.
+
+     Returns
+     -------
+         A Theano variable that contains a sample from a binary distribution.
+     """
+    random = random or RandomStreams(get_rng().randint(1, 2147462579))
+    pvals = pvals or T.ones(shape) / th_fx(shape[1])
+    samples = random.multinomial(pvals=pvals, n=n)
+    samples = samples if dtype is None else T.cast(samples, dtype)
     return samples
 
 
 @multi_sampler
-def th_binary(shape, p=0.5, v0=0, v1=1, dtype=None):
+def binary(shape, p=0.5, v0=0, v1=1, dtype=None, random=None):
     """
     Draws a symbolic sample from a Bernoulli distribution.
 
@@ -201,6 +249,8 @@ def th_binary(shape, p=0.5, v0=0, v1=1, dtype=None):
         Sample value 1. Defaults to 1.
     dtype: numpy data-type, optional
         The desired dtype of the sample. Defaults to ``floatX``.
+    random: Theano RandomStreams or None
+        An optional RandomStreams to be used for sampling.
     
     Returns
     -------
@@ -210,8 +260,8 @@ def th_binary(shape, p=0.5, v0=0, v1=1, dtype=None):
     if v0 < v1:
         v0, v1 = v1, v0
         p = 1 - p
-    srng = RandomStreams(get_rng().randint(1, 2147462579))
-    samples = srng.binomial(shape, p=p, dtype=dtype)
+    random = random or RandomStreams(get_rng().randint(1, 2147462579))
+    samples = random.binomial(shape, p=p, dtype=dtype)
     samples = zero_grad(samples)
     if v0 != 0 or v1 != 1:
         samples *= v1 - v0
@@ -220,9 +270,9 @@ def th_binary(shape, p=0.5, v0=0, v1=1, dtype=None):
 
 
 @multi_sampler
-def th_uniform_ball(shape, radius=None, dtype=None):
+def uniform_ball(shape, radius=None, dtype=None, random=None):
     """
-    Draws a sample from the uniform hypershphere.
+    Draws a sample from the uniform hypersphere.
 
     Parameters
     ----------
@@ -233,6 +283,8 @@ def th_uniform_ball(shape, radius=None, dtype=None):
         sample zero-mean and unit-variance.
     dtype: numpy data-dtype, optional
         The desired dtype of the sample. Defaults to ``floatX``.
+    random: Theano RandomStreams or None
+        An optional RandomStreams to be used for sampling.
     
     Returns
     -------
@@ -241,8 +293,8 @@ def th_uniform_ball(shape, radius=None, dtype=None):
     dtype = dtype or theano.config.floatX
     dim = T.cast(shape[-1], dtype)
     radius = radius or T.sqrt(dim + 2)
-    u = th_uniform(shape, dtype=dtype)
-    x = th_normal(shape, dtype=dtype)
+    u = uniform(shape, dtype=dtype, random=random)
+    x = normal(shape, dtype=dtype, random=random)
     distance = radius * u ** (1 / dim)
     norm = T.sqrt(T.sum(T.sqr(x), axis=-1, keepdims=True))
     return distance / norm * x
