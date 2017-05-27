@@ -136,7 +136,8 @@ def th_uniform(shape, min=0, max=1, dtype=None):
     samples = srng.uniform(shape, dtype=dtype)
     samples = zero_grad(samples)
     if min != 0 or max != 1:
-        samples *= (max - min) + min
+        samples *= (max - min)
+        samples += min
     return samples
 
 
