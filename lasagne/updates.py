@@ -81,6 +81,7 @@ __all__ = [
     "adadelta",
     "adam",
     "adamax",
+    "cocob",
     "norm_constraint",
     "total_norm_constraint",
     "apply_decay",
@@ -725,6 +726,35 @@ def adamax(loss_or_grads, params, learning_rate=0.002, beta1=0.9,
         updates[param] = param - step
 
     updates[t_prev] = t
+    return updates
+
+
+def cocob(loss_or_grads, params, alpha=1000, epsilon=1e-9, use_sigmoid=False):
+    grads = get_or_compute_grads(loss_or_grads, params)
+    updates = OrderedDict()
+    # from .utils import theano_print_values
+    for param, grad in zip(params, grads):
+        value = param.get_value(borrow=True)
+        l = theano.shared(np.zeros(value.shape, dtype=value.dtype),
+                          broadcastable=param.broadcastable)
+        g = theano.shared(np.zeros(value.shape, dtype=value.dtype),
+                          broadcastable=param.broadcastable)
+        r = theano.shared(np.zeros(value.shape, dtype=value.dtype),
+                          broadcastable=param.broadcastable)
+        s = theano.shared(np.zeros(value.shape, dtype=value.dtype),
+                          broadcastable=param.broadcastable)
+        # grad = theano_print_values(grad, "grad_" + param.name)
+        l_t = T.maximum(l * 0.999, T.abs_(grad))
+        # l_t = theano_print_values(l_t, "l_" + param.name)
+        g_t = g + T.abs_(grad)
+        r_t = T.clip(r - param * grad, 0, 1000)
+        s_t = s + grad
+        factor = s_t / (l_t * T.maximum(g_t + l_t, alpha * l_t) + epsilon)
+        # if not use_sigmoid:
+        # else:
+        #     factor = 2 * T.nnet.sigmoid(2 * s_t / (T.maximum(g_t + l_t, alpha * l_t) + epsilon)) - 1
+        #     factor /= (l_t + epsilon)
+        updates[param] = param - factor * (l_t + r_t)
     return updates
 
 

@@ -24,10 +24,10 @@ class SKFGNLossLayer(Layer):
 
     Parameters
     ----------
-    incoming : a tuple/list of :class:`Layer` or a single instance or shape.
+    incoming : a tuple or list of :class:`Layer` or a single instance or shape.
         The layer/s feeding into this layer.
 
-    repeats : tuple of ints
+    repeats : tuple or list of ints
         If when calculating the loss any of the layers need to be repeat,
         this will contain how many time to repeat each incoming layer.
         The length of `repeats` must be equal to the number of inputs.
@@ -71,21 +71,29 @@ class SumLosses(SKFGNLossLayer):
 
     Parameters
     ----------
-    weights : tuple/ndarray or None
+    incoming : tuple or list or ndarray or None
         How to weight each incoming layer. If none all weights are set to 1.
 
-    weights : tuple of ints
+    mode : str (default: mean)
+        1. "mean" - sums the means of all incoming losses
+        2. "sum" - sums the sums of all incoming losses
+        3. "merge" - just adds together all incoming losses without reductions
+
+    weights : tuple or list of ints
         If when calculating the loss any of the layers need to be repeat,
         this will contain how many time to repeat each incoming layer.
         The length of `repeats` must be equal to the number of inputs.
 
-    skfgn_weights : tuple of ints
+    skfgn_weights : tuple or list of ints
         If for some reason you want to weight differently the losses for
         the curvature calculation you can use this. By default these are
         initialized to `weights`
     """
 
-    def __init__(self, incoming, weights=None, skfgn_weights=None, **kwargs):
+    def __init__(self, incoming, mode="mean",
+                 weights=None, skfgn_weights=None, **kwargs):
+        assert mode in ("merge", "sum", "mean")
+        self.mode = mode
         super(SumLosses, self).__init__(incoming, max_inputs=10, **kwargs)
         if weights is None:
             self.weights = [T.constant(1) for _ in self.input_shapes]
@@ -96,12 +104,32 @@ class SumLosses(SKFGNLossLayer):
         else:
             self.skfgn_weights = skfgn_weights
 
+    @staticmethod
+    def get_shape_on_axis(shapes, axis=0):
+        n = None
+        for shape in shapes:
+            if len(shape) > axis and shape[axis] is not None:
+                if n is not None:
+                    assert n == shape[axis]
+                else:
+                    n = shape[axis]
+        return n
+
     def get_outputs_for(self, inputs, **kwargs):
         assert len(inputs) == len(self.weights)
-        return sum(T.mean(i) * w for i, w in zip(inputs, self.weights)),
+        if self.mode == "merge":
+            return sum(i * w for i, w in zip(inputs, self.weights)),
+        elif self.mode == "mean":
+            return sum(T.mean(i) * w for i, w in zip(inputs, self.weights)),
+        else:
+            return sum(T.sum(i) * w for i, w in zip(inputs, self.weights)),
 
     def get_output_shapes_for(self, input_shapes):
-        return ()
+        if self.mode == "merge":
+            n = SumLosses.get_shape_on_axis(input_shapes)
+            return (n, ),
+        else:
+            return (),
 
     def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
         return self.weights
@@ -123,10 +151,10 @@ class SquaredLoss(SKFGNLossLayer):
 
     Parameters
     ----------
-    x : a :class:`Layer` instance or a tuple
+    x : a :class:`Layer` instance or a tuple or list
         The layer or the expected input shape for `x`.
 
-    y : a :class:`Layer` instance or a tuple
+    y : a :class:`Layer` instance or a tuple or list
         The layer or the expected input shape for `y`.
 
     x_repeats: int (default: 1)
@@ -196,10 +224,10 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
 
     Parameters
     ----------
-    output : a :class:`Layer` instance or a tuple
+    output : a :class:`Layer` instance or a tuple or list
         The layer or the expected input shape for `output`.
 
-    target : a :class:`Layer` instance or a tuple
+    target : a :class:`Layer` instance or a tuple or list
         The layer or the expected input shape for `target`.
 
     x_repeats: int (default: 1)

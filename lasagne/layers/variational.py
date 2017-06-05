@@ -29,7 +29,7 @@ class GaussianParameters(Layer):
 
     Parameters
     ----------
-    incoming : a :class:`Layer` instance or a tuple
+    incoming : a :class:`Layer` instance or a tuple or a list
         The layer feeding into this layer, or the expected input shape
 
     nonlinearity : callable
@@ -87,7 +87,7 @@ class GaussianSampler(Layer):
 
     Parameters
     ----------
-    incoming : a :class:`Layer` instance or a tuple
+    incoming : a :class:`Layer` instance or a tuple or list
         The layer/s feeding into this layer, or the expected input shape/s
 
     num_samples : int (default: 1)
@@ -198,10 +198,10 @@ class GaussianKL(SKFGNLossLayer):
 
     Parameters
     ----------
-    q : a :class:`Layer` instance or a tuple
+    q : a :class:`Layer` instance or a tuple or a list
         The layer or the expected input shape for `q`.
 
-    p : a :class:`Layer` instance or a tuple
+    p : a :class:`Layer` instance or a tuple or a list
         The layer or the expected input shape for `q`.
 
     q_repeats: int (default: 1)
@@ -424,10 +424,10 @@ class GaussianLikelihood(SKFGNLossLayer):
 
     Parameters
     ----------
-    x : a :class:`Layer` instance or a tuple
+    x : a :class:`Layer` instance or a tuple or a list
         The layer or the expected input shape for `x`.
 
-    p : a :class:`Layer` instance or a tuple
+    p : a :class:`Layer` instance or a tuple or a list
         The layer or the expected input shape for `p`.
 
     num_samples: int (default: 1)
@@ -484,7 +484,7 @@ class GaussianEntropy(SKFGNLossLayer):
 
     Parameters
     ----------
-    p : a :class:`Layer` instance or a tuple
+    p : a :class:`Layer` instance or a tuple or a list
         The layer or the expected input shape for `p`.
     """
     def __init__(self, p, *args, **kwargs):
@@ -523,10 +523,10 @@ class IWAEBound(SKFGNLossLayer):
 
     Parameters
     ----------
-    incoming : a :class:`Layer` instances or a tuples
+    incoming : a :class:`Layer` instances or a tuples or lists
         The layers or the expected input shapes
 
-    weights: tuple or None
+    weights: tuple or list or None
         Any scalar weighting which to apply to the logits.
     """
     def __init__(self, incoming, weights=None, num_samples=1,
