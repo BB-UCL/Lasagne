@@ -27,9 +27,38 @@ def autoencoder(arch, binary=True, nonl=tanh):
     # P(x|z)
     layer = L.DenseLayer(layer, arch[0], nonlinearity=identity, name="p")
     if binary:
-        l_loss = L.BinaryLogitsCrossEntropy((layer, l_in), name="crossentropy")
+        l_loss = L.BinaryLogitsCrossEntropy(layer, l_in,
+                                            name="crossentropy")
     else:
-        l_loss = L.SquareLoss((layer, l_in), name="squareloss")
+        l_loss = L.SquaredLoss(layer, l_in,
+                               name="squareloss")
+    return [l_in.input_var], l_loss
+
+
+def convae(arch, binary=True, nonl=tanh):
+    # Input
+    # x_in = theano.shared(np.random.rand(100, 784)).astype(theano.config.floatX)
+    l_in = L.InputLayer((None, 784), name="x")
+    layer = L.reshape(l_in, (-1, 1, 28, 28))
+    # Encoder
+    for i in range(1, len(arch)):
+        layer = L.Conv2DLayer(layer, arch[i], (3, 3), pad="same",
+                              nonlinearity=nonl, name="encode_" + str(i))
+        layer = L.MaxPool2DLayer(layer, (2, 2))
+        # layer = L.NonlinearityLayer(layer, nonl, name="encode_" + str(i) + "_a")
+    # Decoder
+    for i in reversed(range(1, len(arch) - 1)):
+        layer = L.DenseLayer(layer, arch[i], nonlinearity=nonl,
+                             name="decode_" + str(i))
+        # layer = L.NonlinearityLayer(layer, nonl, name="decode_" + str(i) + "_a")
+    # P(x|z)
+    layer = L.DenseLayer(layer, arch[0], nonlinearity=identity, name="p")
+    if binary:
+        l_loss = L.BinaryLogitsCrossEntropy(layer, l_in,
+                                            name="crossentropy")
+    else:
+        l_loss = L.SquaredLoss(layer, l_in,
+                               name="squareloss")
     return [l_in.input_var], l_loss
 
 
@@ -52,20 +81,20 @@ def main(dataset="mnist", batch_size=1000, epochs=20):
         binary = True
     else:
         raise ValueError("Unrecognized dataset:", dataset)
-    arch = (input_dim, 1000, 500, 250, 50)
-    in_vars, l_loss = autoencoder(arch, binary=binary)
-    # optim_args = {"variant": "skfgn-rp",
-    #               "curvature_avg": 0.9,
-    #               "mirror_avg": 0.9,
-    #               "random_sampler": "index"}
-    # optimizer = optimizer_from_dict(optim_args)
-    # updates, mirror_map, loss = optimizer(l_loss)
-    # train_f = theano.function(in_vars, loss, updates=updates)
-    loss = T.mean(L.get_output(l_loss))
-    params = L.get_all_params(l_loss)
-    updates = upd.cocob(loss, params, use_sigmoid=True)
-    # updates = upd.adam(loss, params, learning_rate=1e-3)
+    arch = (input_dim, 64, 64, 128, 128)
+    in_vars, l_loss = convae(arch, binary=binary)
+    optim_args = {"variant": "kfra",
+                  "curvature_avg": 0.9,
+                  "mirror_avg": 0.9,
+                  "random_sampler": "index"}
+    optimizer = optimizer_from_dict(optim_args)
+    updates, mirror_map, loss = optimizer(l_loss)
     train_f = theano.function(in_vars, loss, updates=updates)
+    # loss = T.mean(L.get_output(l_loss))
+    # params = L.get_all_params(l_loss)
+    # updates = upd.cocob(loss, params, use_sigmoid=True)
+    # updates = upd.adam(loss, params, learning_rate=1e-3)
+    # train_f = theano.function(in_vars, loss, updates=updates)
     # Prepare data
     data = get_dataset(dataset)
     data.load()
@@ -81,6 +110,7 @@ def main(dataset="mnist", batch_size=1000, epochs=20):
     for e in range(epochs):
         for x, y in data.iter("train", batch_size):
             start_time = time.time()
+            # train_f()
             results[i, 1] = train_f(*data_transform(x, y))
             results[i, 0] = time.time() - start_time
             print("[{:.2f}s][{}]Loss:".format(results[i, 0], i), results[i, 1])

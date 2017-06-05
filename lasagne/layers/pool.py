@@ -283,6 +283,15 @@ class Pool2DLayer(Layer):
                          )
         return pooled,
 
+    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+        assert len(inputs) == 1
+        assert len(outputs) == 1
+        assert len(curvature) == 1
+        if optimizer.variant == "kfra":
+            return curvature
+        else:
+            return T.Lop(outputs[0], inputs[0], curvature[0]),
+
 
 class MaxPool1DLayer(Pool1DLayer):
     """

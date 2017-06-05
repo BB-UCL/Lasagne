@@ -824,10 +824,9 @@ def expand_variable(var, repeats, axis=0):
     if repeats == 1:
         return var
     shape = [var.shape[i] for i in range(var.ndim)]
-    extra_shape = shape[:axis] + [1] + shape[axis:]
-    repeats = [1 for _ in shape[:axis]] + [repeats] + [1 for _ in shape[axis:]]
-    expanded = T.tile(var.reshape(extra_shape), repeats)
-    shape[axis] *= repeats[axis]
+    extra_shape = shape[:axis + 1] + [1] + shape[axis + 1:]
+    expanded = T.repeat(T.reshape(var, extra_shape), repeats, axis=axis+1)
+    shape[axis] *= repeats
     return expanded.reshape(shape)
 
 
@@ -854,8 +853,8 @@ def collapse_variable(var, repeats, axis=0):
     if repeats == 1:
         return var
     shape = [var.shape[i] for i in range(var.ndim)]
-    extra_shape = shape[:axis] + [repeats] + shape[axis:]
-    extra_shape[axis] = T.int_div(extra_shape[axis], repeats)
+    extra_shape = shape[:axis + 1] + [repeats] + shape[axis + 1:]
+    extra_shape[axis] = -1
     var = T.reshape(var, extra_shape)
     return T.mean(var, axis=(axis + 1))
 

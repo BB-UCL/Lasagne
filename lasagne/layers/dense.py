@@ -80,13 +80,15 @@ class DenseLayer(Layer):
     """
     def __init__(self, incoming, num_units, W=init.GlorotUniform(),
                  b=init.Constant(0.), nonlinearity=nonlinearities.rectify,
-                 num_leading_axes=1, fused_bias=True, **kwargs):
+                 num_leading_axes=1,
+                 fused_bias=True, invariant_axes=(2, 3), **kwargs):
         super(DenseLayer, self).__init__(incoming, **kwargs)
         self.nonlinearity = (nonlinearities.identity if nonlinearity is None
                              else nonlinearity)
 
         self.num_units = num_units
         self.fused_bias = fused_bias
+        self.invariant_axes = invariant_axes
         if num_leading_axes >= len(self.input_shape):
             raise ValueError(
                 "Got num_leading_axes=%d for a %d-dimensional input, "
@@ -131,14 +133,17 @@ class DenseLayer(Layer):
         input_shape = input_shapes[0]
         return input_shape[:self.num_leading_axes] + (self.num_units, ),
 
-    def get_outputs_for(self, inputs, **kwargs):
-        x = inputs[0]
+    def transform_x(self, x):
         num_leading_axes = self.num_leading_axes
         if num_leading_axes < 0:
             num_leading_axes += x.ndim
         if x.ndim > num_leading_axes + 1:
             # flatten trailing axes (into (n+1)-tensor for num_leading_axes=n)
             x = x.flatten(num_leading_axes + 1)
+        return x
+
+    def get_outputs_for(self, inputs, **kwargs):
+        x = self.transform_x(inputs[0])
 
         if self.b is None:
             activation = T.dot(x, self.W)
@@ -169,10 +174,8 @@ class DenseLayer(Layer):
         if self.b is not None and not self.fused_bias:
             index += 1
         activation = path[index]
-        # if optimizer.debug:
-        #     print("Actibation:", activation, index, path)
         # Extract info and calculate Q
-        x = inputs[0]
+        x = self.transform_x(inputs[0])
         curvature = curvature[0]
         x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
         n = th_fx(x.shape[0])
@@ -189,7 +192,17 @@ class DenseLayer(Layer):
                 kronecker_inversion(self, self.W_fused, q, g)
             else:
                 kronecker_inversion(self, (self.W, self.b), q, g)
-            return T.dot(T.dot(self.W, g), self.W.T),
+            if len(self.input_shapes[0]) > 2:
+                if self.invariant_axes != (2, 3):
+                    raise ValueError("You are using KFRA on a dense layer with an input of size more than 2D."
+                                     "However, this requires that you are invariant on axis 2 and 3 which you are"
+                                     "not. Ask yourself - But why?")
+                mn = inputs[0].shape[2] * inputs[0].shape[3]
+                w = T.reshape(self.W, (inputs[0].shape[1], mn, self.W.shape[1]))
+                w = T.sum(w, axis=1)
+                return T.dot(T.dot(w, g), w.T),
+            else:
+                return T.dot(T.dot(self.W, g), self.W.T),
         else:
             # Propagate curvature trough the nonlinearity and calculate the activation GN
             if self.nonlinearity != nonlinearities.identity:

@@ -13,5 +13,5 @@ from .embedding import *
 # from .recurrent import *
 from .recurrent_new import *
 from .special import *
-from .variational import *
 from .losses import *
+from .variational import *

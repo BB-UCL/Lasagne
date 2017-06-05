@@ -369,7 +369,6 @@ class Optimizer(object):
             gamma = self.get_gamma(self.grad_avg, t)
             grad = gamma * grad_avg + (1 - gamma) * grad
             updates[grad_avg] = grad
-
         if q_dim == 0 and g_dim == 0:
             step = grad / (q + g + self.tikhonov_damping)
         elif q_dim == 0:
