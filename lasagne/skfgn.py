@@ -95,7 +95,9 @@ class Optimizer(object):
         :param: debug: bool (defualt False)
             Whether to print debug info when performing SKFGN
         """
-        if variant not in VARIANTS:
+        if variant == "kfac_star":
+            variant = "kfac*"
+        elif variant not in VARIANTS:
             raise ValueError("Variant must be one of {}".format(str(VARIANTS)))
         self.__variant = variant
         self.random_sampler = random_sampler
@@ -121,8 +123,12 @@ class Optimizer(object):
 
     @variant.setter
     def variant(self, value):
-        if value not in VARIANTS:
+        if value == "kfac_star":
+            self.__variant = "kfac*"
+        elif value not in VARIANTS:
             raise ValueError("Variant must be one of {}".format(str(VARIANTS)))
+        else:
+            self.__variant = value
 
     def __call__(self, loss_layer,
                  l2_reg=None,
@@ -265,7 +271,8 @@ class Optimizer(object):
                 grads = grads_map[params]
             self.kronecker_inversion(owning_layer, params, q, g, grads,
                                      steps_map,  t, extra_updates)
-
+        if self.debug:
+            print("Running SKFGN with variant", self.variant)
         # Start from the loss layer
         curvature_map[loss_layer] = [loss_grad]
         all_layers = get_all_layers(loss_layer, treat_as_input)
