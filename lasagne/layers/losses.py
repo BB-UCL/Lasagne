@@ -90,7 +90,7 @@ class SumLosses(SKFGNLossLayer):
         initialized to `weights`
     """
 
-    def __init__(self, incoming, mode="mean",
+    def __init__(self, incoming, mode="merge",
                  weights=None, skfgn_weights=None, **kwargs):
         assert mode in ("merge", "sum", "mean")
         self.mode = mode
@@ -288,6 +288,10 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
         return utils.gauss_newton_product(x, hess, params, v1, v2)
 
 
-def bernoulli_logits_ll(*args, **kwargs):
-    layer = BinaryLogitsCrossEntropy(*args, **kwargs)
-    return SumLosses(layer, weights=[-1])
+def bernoulli_logits_ll(output, target,
+                        x_repeats=1, y_repeats=1,
+                        *args, **kwargs):
+    layer = BinaryLogitsCrossEntropy(output, target,
+                                     x_repeats, y_repeats,
+                                     *args, **kwargs)
+    return SumLosses(layer, mode="merge", weights=[-1])

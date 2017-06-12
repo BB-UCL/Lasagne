@@ -759,8 +759,8 @@ def gauss_newton_product(outputs, outputs_hess, params, v1, v2=None):
     The expected value of the product with the Generalized Gauss-Newton matrix.
     """
     assert outputs_hess.ndim == 2 or outputs_hess.ndim == 0
-    Jv1 = T.Rop(outputs, params, v1)
-    Jv2 = T.Rop(outputs, params, v2) if v2 else Jv1
+    Jv1 = Rop(outputs, params, v1)
+    Jv2 = Rop(outputs, params, v2) if v2 else Jv1
     return T.mean(T.sum(Jv1 * Jv2 * outputs_hess, axis=1))
 
 
@@ -929,3 +929,13 @@ def set_parameters(params, value_mapping, verbose=True):
         else:
             if verbose:
                 print("Skipping parameter", p.name)
+
+
+def Rop(f, wrt, v):
+    return T.Rop(f, wrt, v)
+    # if isinstance(f, (list, tuple)):
+    #     u = [T.zeros_like(i) for i in f]
+    #     return T.Lop(T.Lop(f, wrt, u), u, v)
+    # else:
+    #     u = T.zeros_like(f)
+    #     return T.Lop(T.Lop(f, wrt, u), u, v)

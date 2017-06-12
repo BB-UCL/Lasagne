@@ -389,8 +389,8 @@ class Optimizer(object):
         else:
             omega = T.sqrt(self.norm(q) / self.norm(g))
             add_to_report(w.name + "_omega", omega)
-            q += T.eye(q_dim) * T.sqrt(self.tikhonov_damping) * omega
-            g += T.eye(g_dim) * T.sqrt(self.tikhonov_damping) / omega
+            q += T.eye(q_dim) * T.sqrt(self.tikhonov_damping) / omega
+            g += T.eye(g_dim) * T.sqrt(self.tikhonov_damping) * omega
             step = utils.linear_solve(q, grad, "symmetric")
             step = utils.linear_solve(g, step.T, "symmetric").T
         if b is None:
@@ -616,3 +616,73 @@ def optimizer_from_dict(primitive_dict):
             primitive_dict["update_function"] = upd.wrap_with_burnout(primitive_dict["update_function"], burnout)
 
     return Optimizer(**primitive_dict)
+
+
+class KroneckerMatrix(object):
+    """
+    Represents a Positive Semi-Definite matrix that is Kronecker Factored.
+    Each factor is an expectation over
+    """
+    def __init__(self,
+                 name,
+                 a_dim,
+                 b_dim,
+                 n=None,
+                 a_sqrt_factor=None,
+                 b_sqrt_factor=None,
+                 a=None,
+                 b=None,
+                 persistent=True,
+                 k=1e-3,
+                 update_fn=None,
+                 norm=None):
+        assert a_sqrt_factor is not None or a is None
+        assert a_sqrt_factor is None or a is None
+        assert b_sqrt_factor is not None or b is None
+        assert b_sqrt_factor is None or b is None
+        assert n is not None or a is not None or b is not None
+        self.name = name
+        self.n = n
+        if a is not None:
+            self.a = a
+        else:
+            self.a_sqrt_factor = a_sqrt_factor
+            self.a = T.dot(a_sqrt_factor.T, a_sqrt_factor) / utils.th_fx(n)
+        if b is not None:
+            self.b = b
+        else:
+            self.b_sqrt_factor = b_sqrt_factor
+            self.b = T.dot(a_sqrt_factor.T, a_sqrt_factor) / utils.th_fx(n)
+        self.persistent = persistent
+        if persistent:
+            assert update_fn is not None
+            self.a_p = theano.shared(utils.floatX(np.eye(a_dim)), name=name + "_A")
+            self.b_p = theano.shared(utils.floatX(np.eye(b_dim)), name=name + "_B")
+            self.a_upd = update_fn(self.a_p, self.a)
+            self.b_upd = update_fn(self.b_p, self.b)
+        else:
+            self.a_p = None
+            self.b_p = None
+            self.a_upd = None
+            self.b_upd = None
+        self.k = k
+        self.norm = norm
+
+    def linear_solve(self, v, use="updates"):
+        assert v.ndim == 2
+        assert use in ("updates", "raw", "persistent")
+        if use == "raw" or not self.persistent:
+            a, b = self.a, self.b
+        elif use == "updates":
+            a, b = self.a_upd, self.b_upd
+        else:
+            a, b = self.a_p, self.b_p
+        omega = T.sqrt(self.norm(a) / self.norm(b))
+        add_to_report(self.name + "_omega", omega)
+        a += T.eye(a.shape[0]) * T.sqrt(self.k) * omega
+        b += T.eye(b.shape[0]) * T.sqrt(self.k) / omega
+        v1 = utils.linear_solve(a, v, "symmetric")
+        v2 = utils.linear_solve(b, v1.T, "symmetric").T
+        return v2
+
+

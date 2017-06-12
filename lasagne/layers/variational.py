@@ -6,7 +6,7 @@ import numpy as np
 from .base import Layer
 from .losses import SKFGNLossLayer
 from ..nonlinearities import softplus
-from ..utils import th_fx, expand_variable, collapse_variable
+from ..utils import th_fx, expand_variable, collapse_variable, Rop
 from ..random import normal
 
 
@@ -127,8 +127,7 @@ class GaussianSampler(Layer):
             sigma = inputs[1]
         else:
             mu, sigma = GaussianParameters.get_raw(inputs[0])
-        n = mu.shape[0]
-        d = mu.shape[1]
+        n, d = mu.shape
         epsilon = normal((n, self.num_samples, d))
         # from theano.gradient import zero_grad
         # epsilon = zero_grad(T.ones((n, self.num_samples, d)))
@@ -369,10 +368,10 @@ class GaussianKL(SKFGNLossLayer):
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
         q, p, q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs_map[self], True, True)
         if self.state == 1 or self.state == 2:
-            Jv1_q = T.Rop(q, params, v1)
+            Jv1_q = Rop(q, params, v1)
             Jv1_q = expand_variable(Jv1_q, self.repeats[0])
             if v2 is not None:
-                Jv2_q = T.Rop(q, params, v2)
+                Jv2_q = Rop(q, params, v2)
                 Jv2_q = expand_variable(Jv2_q, self.repeats[0])
             else:
                 Jv2_q = Jv1_q
@@ -392,10 +391,10 @@ class GaussianKL(SKFGNLossLayer):
         else:
             v1Jv2_q = 0
         if self.state == 1 or self.state == 3:
-            Jv1_p = T.Rop(p, params, v1)
+            Jv1_p = Rop(p, params, v1)
             Jv1_p = expand_variable(Jv1_p, self.repeats[1])
             if v2 is not None:
-                Jv2_p = T.Rop(p, params, v2)
+                Jv2_p = Rop(p, params, v2)
                 Jv2_p = expand_variable(Jv2_p, self.repeats[1])
             else:
                 Jv2_p = Jv1_p
@@ -462,7 +461,7 @@ class GaussianLikelihood(SKFGNLossLayer):
         else:
             assert len(inputs) == 1
             x = inputs[0]
-            log_p_x = - 0.5 * T.log(T.constant(2 * np.pi)) - 0.5 * T.sqr(x)
+            log_p_x = - 0.5 * T.log(2 * np.pi) - 0.5 * T.sqr(x)
         return T.sum(log_p_x, axis=1),
 
     def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
@@ -550,13 +549,23 @@ class IWAEBound(SKFGNLossLayer):
 
     def get_outputs_for(self, inputs, **kwargs):
         assert len(inputs) == len(self.weights)
-        loss = sum(i * w for i, w in zip(inputs, self.weights)),
-        if self.num_samples == 1:
-            return loss
-        loss = T.reshape(loss, (-1, self.num_samples))
-        m = zero_grad(T.max(loss, axis=1))
-        conditioned = loss - m.dimshuffle(0, 'x')
-        return m + T.log(T.mean(T.exp(conditioned), axis=1)),
+        # Zero dimensional inputs, e.g. not dependent on the data
+        s0 = 0
+        # One dimensional inputs, e.g. dependent on the data
+        s1 = 0
+        for i, w in zip(inputs, self.weights):
+            if i.ndim == 0:
+                s0 += i * w
+            elif i.ndim == 1:
+                s1 += i * w
+            else:
+                raise ValueError("More than 1D input.")
+        if self.num_samples == 1 or s1 == 0:
+            return s0 + s1,
+        s1 = T.reshape(s1, (-1, self.num_samples))
+        m1 = zero_grad(T.max(s1, axis=1))
+        s1_cond = s1 - m1.dimshuffle(0, 'x')
+        return s0 + m1 + T.log(T.mean(T.exp(s1_cond), axis=1)),
 
     def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
         raise NotImplementedError
