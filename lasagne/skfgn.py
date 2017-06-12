@@ -389,8 +389,8 @@ class Optimizer(object):
         else:
             omega = T.sqrt(self.norm(q) / self.norm(g))
             add_to_report(w.name + "_omega", omega)
-            q += T.eye(q_dim) * T.sqrt(self.tikhonov_damping) / omega
-            g += T.eye(g_dim) * T.sqrt(self.tikhonov_damping) * omega
+            q += T.eye(q_dim) * T.sqrt(self.tikhonov_damping) * omega
+            g += T.eye(g_dim) * T.sqrt(self.tikhonov_damping) / omega
             step = utils.linear_solve(q, grad, "symmetric")
             step = utils.linear_solve(g, step.T, "symmetric").T
         if b is None:
