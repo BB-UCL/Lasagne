@@ -62,10 +62,12 @@ def convae(arch, binary=True, nonl=tanh):
     return [l_in.input_var], l_loss
 
 
-def main(dataset="mnist", batch_size=1000, epochs=20):
+def main(dataset="mnist", batch_size=1000, epochs=20, seed=413):
     print("Data-set:", dataset)
     print("Batch size:", batch_size)
     print("Epochs:", epochs)
+    if seed is not None:
+        np.random.seed(seed)
     # Make model
     if dataset == "faces":
         input_dim = 625
@@ -82,7 +84,8 @@ def main(dataset="mnist", batch_size=1000, epochs=20):
     else:
         raise ValueError("Unrecognized dataset:", dataset)
     arch = (input_dim, 64, 64, 128, 128)
-    in_vars, l_loss = convae(arch, binary=binary)
+    in_vars, l_loss = autoencoder(arch, binary=binary)
+    # in_vars, l_loss = convae(arch, binary=binary)
     optim_args = {"variant": "kfra",
                   "curvature_avg": 0.9,
                   "mirror_avg": 0.9,

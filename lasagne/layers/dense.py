@@ -4,6 +4,7 @@ import theano.tensor as T
 from .. import init
 from .. import nonlinearities
 from ..utils import th_fx, dfs_path
+from ..skfgn import SqrtMatrix, StandardMatrix
 
 from .base import Layer
 
@@ -207,6 +208,12 @@ class DenseLayer(Layer):
             # Propagate curvature trough the nonlinearity and calculate the activation GN
             if self.nonlinearity != nonlinearities.identity:
                 curvature = T.Lop(outputs[0], activation, curvature)
+
+            b_dim, a_dim = self.W_fused.shape.eval()
+            kf_mat = SqrtMatrix(self, b_dim, a_dim, self.get_params(),
+                                a_sqrt=curvature, b_sqrt=x,
+                                k=optimizer.tikhonov_damping)
+
             g = T.dot(curvature.T, curvature) / n
             if self.b is None or self.fused_bias:
                 # In this cases it is simple

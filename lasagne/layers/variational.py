@@ -5,7 +5,8 @@ import numpy as np
 
 from .base import Layer
 from .losses import SKFGNLossLayer
-from ..nonlinearities import softplus
+from .. import nonlinearities
+from .. import init
 from ..utils import th_fx, expand_variable, collapse_variable, Rop
 from ..random import normal
 
@@ -39,7 +40,8 @@ class GaussianParameters(Layer):
     eps : a float
         A conditioning number to ensure the final sigma is not 0.
     """
-    def __init__(self, incoming, nonlinearity=softplus, eps=1e-6, **kwargs):
+    def __init__(self, incoming, nonlinearity=nonlinearities.softplus,
+                 eps=1e-6, **kwargs):
         super(GaussianParameters, self).__init__(incoming, **kwargs)
         self.nonlinearity = nonlinearity
         self.eps = eps
@@ -180,6 +182,13 @@ class GaussianSampler(Layer):
             return T.constant(0),
         else:
             return T.Lop(outputs[0], inputs[0], curvature[0]),
+
+
+# class GaussianMatrixVariate(Layer):
+#     def __init__(self, incoming, num_units, W=init.GlorotUniform(),
+#                  b=init.Constant(0.), nonlinearity=nonlinearities.tanh,
+#                  num_leading_axes=1,
+#                  fused_bias=True, invariant_axes=(2, 3), **kwargs):
 
 
 class GaussianKL(SKFGNLossLayer):

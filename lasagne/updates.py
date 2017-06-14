@@ -85,7 +85,9 @@ __all__ = [
     "norm_constraint",
     "total_norm_constraint",
     "apply_decay",
-    "lr_decay"
+    "lr_decay",
+    "exponential_moving_average",
+    "ema"
 ]
 
 
@@ -157,6 +159,43 @@ def get_or_compute_grads(loss_or_grads, params):
         return loss_or_grads
     else:
         return theano.grad(loss_or_grads, params)
+
+
+def exponential_moving_average(alpha, s_t, x_t, t=None, init_period=None):
+    """
+    Computes the exponential moving average of the process s_t:
+
+    s_{t+1} = alpha_t * s_t + (1 - alpha_t) * x_t
+
+    If t is None or init_period is None than it is assumed alpha_t is constant.
+    Otherwise, assuming T = init_period:
+
+    alpha_t = alpha * min(1, (T - 1) * t / T^2 + 1 / T)
+
+    Parameters
+    ----------
+    alpha : int, float, np.ndarray or Theano expression
+        Smoothing coefficient
+    s_t : int, float, np.ndarray or Theano expression
+        State of the system at time t.
+    x_t : int, float, np.ndarray or Theano expression
+        Observation at time t.
+    t : int, Theano expression or None
+        Current time.
+    init_period : int, Theano expression or None
+        The initial period with reduced smoothing.
+
+    Returns
+    -------
+    The state of the system at time t + 1.
+    """
+    if t is not None and init_period is not None and init_period > 0:
+        p = utils.th_fx(init_period)
+        t = utils.th_fx(t)
+        alpha *= T.minimum(1.0, (p - 1.0) * t / T.sqr(p) + T.inv(p))
+    return alpha * s_t + (1 - alpha) * x_t
+
+ema = exponential_moving_average
 
 
 @lr_decay

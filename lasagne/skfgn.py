@@ -104,10 +104,15 @@ class Optimizer(object):
         self.norm = norm
         self.tikhonov_damping = tikhonov_damping
         self.rescale_by_gn = rescale_by_gn
-        self.grad_avg = grad_avg
-        self.curvature_avg = curvature_avg
-        self.mirror_avg = mirror_avg
+
         self.avg_init_period = avg_init_period
+        self._grad_avg = None
+        self.grad_avg = grad_avg
+        self._curvature_avg = None
+        self.curvature_avg = curvature_avg
+        self._mirror_avg = None
+        self.mirror_avg = mirror_avg
+
         self.clipping = clipping
         self.learning_rate = learning_rate
         self.update_function = update_function
@@ -129,6 +134,60 @@ class Optimizer(object):
             raise ValueError("Variant must be one of {}".format(str(VARIANTS)))
         else:
             self.__variant = value
+
+    @property
+    def grad_avg(self):
+        return self._grad_avg
+
+    @grad_avg.setter
+    def grad_avg(self, value):
+        if value is None or value == 0:
+            self._grad_avg = None
+        elif isinstance(value, (int, float, np.ndarray, T.TensorVariable)):
+            def avg(s_t, x_t, t, init_period):
+                return upd.ema(value, s_t, x_t, t, init_period)
+
+            self._grad_avg = avg
+        elif callable(value):
+            self._grad_avg = value
+        else:
+            raise ValueError("Unrecognized type of grad_avg:" + str(type(value)))
+
+    @property
+    def curvature_avg(self):
+        return self._curvature_avg
+
+    @curvature_avg.setter
+    def curvature_avg(self, value):
+        if value is None or value == 0:
+            self._curvature_avg = None
+        elif isinstance(value, (int, float, np.ndarray, T.TensorVariable)):
+            def avg(s_t, x_t, t, init_period):
+                return upd.ema(value, s_t, x_t, t, init_period)
+
+            self._curvature_avg = avg
+        elif callable(value):
+            self._curvature_avg = value
+        else:
+            raise ValueError("Unrecognized type of curvature_avg:" + str(type(value)))
+
+    @property
+    def mirror_avg(self):
+        return self._mirror_avg
+
+    @mirror_avg.setter
+    def mirror_avg(self, value):
+        if value is None or value == 0:
+            self._mirror_avg = None
+        elif isinstance(value, (int, float, np.ndarray, T.TensorVariable)):
+            def avg(s_t, x_t, t, init_period):
+                return upd.ema(value, s_t, x_t, t, init_period)
+
+            self._mirror_avg = avg
+        elif callable(value):
+            self._mirror_avg = value
+        else:
+            raise ValueError("Unrecognized type of mirror_avg:" + str(type(value)))
 
     def __call__(self, loss_layer,
                  l2_reg=None,
@@ -217,9 +276,7 @@ class Optimizer(object):
         # Create mirroring map useful for evaluating validation etc..
         mirror_map = dict()
         # For each parameter create a smoothed mirroring parameter
-        if self.mirror_avg > 0:
-            gamma = self.get_gamma(self.mirror_avg, t)
-            # gamma = utils.theano_print_values(gamma, "gamma")
+        if self.mirror_avg is not None:
             all_layers = get_all_layers(loss_layer)
             for w in params:
                 for l in all_layers:
@@ -233,7 +290,7 @@ class Optimizer(object):
                                              trainable=False,
                                              regularizable=False,
                                              mirror=True)
-                        updates[mirror] = gamma * mirror + (1 - gamma) * updates[w]
+                        updates[mirror] = self.mirror_avg(mirror, updates[w], t, self.avg_init_period)
                         mirror_map[w] = mirror
                         if self.debug:
                             print("Adding", mirror.name, "to updates and mirror map.")
@@ -306,21 +363,6 @@ class Optimizer(object):
             steps.append(steps_map.get(w, g))
             if steps_map.get(w) is None:
                 print("Parameter", w, "was not update with SKFGN, falling back to just gradient")
-        # extra_updates = OrderedDict()
-        # steps = []
-        #
-        # t = utils.th_fx(extra_updates[t])
-        # for w, grad in grads_map.items():
-        #     # Extract all layers owning the parameter
-        #     owning_layers = []
-        #     for l in all_layers:
-        #         if w in l.params:
-        #             owning_layers.append(l)
-        #             break
-        #     # Calculate the steps for each parameter
-        #     step = self.kronecker_inversion(owning_layers, w, q_map[w], g_map[w], grad, t, extra_updates)
-        #     steps.append(step)
-
         return steps, extra_updates, t
 
     def kronecker_inversion(self, layer, w, q, g, grad, steps_map, t, updates):
@@ -340,7 +382,7 @@ class Optimizer(object):
             q_dim += 1
 
         # Curvature smoothing/momentum
-        if self.curvature_avg > 0:
+        if self.curvature_avg is not None:
             q_avg = layer.add_param(utils.floatX(np.eye(q_dim) * self.tikhonov_damping),
                                     (q_dim, q_dim),
                                     name=name + "_q",
@@ -355,17 +397,13 @@ class Optimizer(object):
                                     trainable=False,
                                     regularizable=False,
                                     skfgn=True)
-            # Linearly increasing moving average parameter for the first `avg_init_period` iterations
-            gamma = self.get_gamma(self.curvature_avg, t)
-            # The smoothed curvature matrices
-            q = gamma * q_avg + (1 - gamma) * q
-            g = gamma * g_avg + (1 - gamma) * g
-            # Add smoothed curvature matrices to updates
+            q = self.curvature_avg(q_avg, q, t, self.avg_init_period)
+            g = self.curvature_avg(g_avg, g, t, self.avg_init_period)
             updates[q_avg] = q
             updates[g_avg] = g
 
         # Gradient smoothing/momentum
-        if self.grad_avg:
+        if self.grad_avg is not None:
             grad_avg = layer.add_param(utils.floatX(np.zeros((q_dim, g_dim))),
                                        (q_dim, g_dim),
                                        name=name + "_grad",
@@ -373,8 +411,7 @@ class Optimizer(object):
                                        trainable=False,
                                        regularizable=False,
                                        stats=True)
-            gamma = self.get_gamma(self.grad_avg, t)
-            grad = gamma * grad_avg + (1 - gamma) * grad
+            grad = self.curvature_avg(grad_avg, grad, t, self.avg_init_period)
             updates[grad_avg] = grad
         if q_dim == 0 and g_dim == 0:
             step = grad / (q + g + self.tikhonov_damping)
@@ -470,10 +507,6 @@ class Optimizer(object):
             add_to_report("kf_alpha", T.stack((alpha_1, alpha_2)))
             add_to_report("kf_reduction", reduction)
             return [step_1 * alpha_1 + step_2 * alpha_2 for step_1, step_2 in zip(steps1, steps2)]
-
-    def get_gamma(self, mu, t):
-        c = mu / (self.avg_init_period - 1)
-        return T.minimum(mu, t * (self.curvature_avg - c) / self.avg_init_period + c)
 
 
 def optimizer_from_dict(primitive_dict):
@@ -618,71 +651,239 @@ def optimizer_from_dict(primitive_dict):
     return Optimizer(**primitive_dict)
 
 
-class KroneckerMatrix(object):
-    """
-    Represents a Positive Semi-Definite matrix that is Kronecker Factored.
-    Each factor is an expectation over
-    """
+class KroneckerFactoredMatrix(object):
     def __init__(self,
-                 name,
+                 layer,
                  a_dim,
                  b_dim,
-                 n=None,
-                 a_sqrt_factor=None,
-                 b_sqrt_factor=None,
-                 a=None,
-                 b=None,
+                 params,
                  persistent=True,
                  k=1e-3,
                  update_fn=None,
-                 norm=None):
-        assert a_sqrt_factor is not None or a is None
-        assert a_sqrt_factor is None or a is None
-        assert b_sqrt_factor is not None or b is None
-        assert b_sqrt_factor is None or b is None
-        assert n is not None or a is not None or b is not None
-        self.name = name
-        self.n = n
-        if a is not None:
-            self.a = a
-        else:
-            self.a_sqrt_factor = a_sqrt_factor
-            self.a = T.dot(a_sqrt_factor.T, a_sqrt_factor) / utils.th_fx(n)
-        if b is not None:
-            self.b = b
-        else:
-            self.b_sqrt_factor = b_sqrt_factor
-            self.b = T.dot(a_sqrt_factor.T, a_sqrt_factor) / utils.th_fx(n)
-        self.persistent = persistent
-        if persistent:
-            assert update_fn is not None
-            self.a_p = theano.shared(utils.floatX(np.eye(a_dim)), name=name + "_A")
-            self.b_p = theano.shared(utils.floatX(np.eye(b_dim)), name=name + "_B")
-            self.a_upd = update_fn(self.a_p, self.a)
-            self.b_upd = update_fn(self.b_p, self.b)
-        else:
-            self.a_p = None
-            self.b_p = None
-            self.a_upd = None
-            self.b_upd = None
+                 norm=utils.mean_trace_norm):
+        self.layer = layer
+        self.a_dim = a_dim
+        self.b_dim = b_dim
+        self.params = params
         self.k = k
+        self.update_fn = update_fn
         self.norm = norm
+        self.persistent_params = None if not persistent else \
+            self.make_persistent()
 
-    def linear_solve(self, v, use="updates"):
-        assert v.ndim == 2
-        assert use in ("updates", "raw", "persistent")
-        if use == "raw" or not self.persistent:
-            a, b = self.a, self.b
-        elif use == "updates":
-            a, b = self.a_upd, self.b_upd
+    def make_persistent(self):
+        a_persistent = self.layer.add_param(
+            utils.floatX(np.eye(self.a_dim) * self.k),
+            (self.a_dim, self.a_dim),
+            name=self.layer + "KF_A",
+            broadcast_unit_dims=False,
+            trainable=False,
+            regularizable=False,
+            kf=True)
+        b_persistent = self.layer.add_param(
+            utils.floatX(np.eye(self.a_dim) * self.k),
+            (self.a_dim, self.a_dim),
+            name=self.layer + "KF_B",
+            broadcast_unit_dims=False,
+            trainable=False,
+            regularizable=False,
+            kf=True)
+        return a_persistent, b_persistent
+
+    def a(self, use):
+        if use == "persistent":
+            return self.persistent_params[0]
         else:
-            a, b = self.a_p, self.b_p
+            raise NotImplementedError
+
+    def b(self, use):
+        assert use in ("updates", "raw", "persistent")
+        if use == "persistent":
+            return self.persistent_params[1]
+        else:
+            raise NotImplementedError
+
+    def linear_solve(self, v, use="updates", right_multiply=True):
+        assert v.ndim == 2
+        a, b = self.a(use), self.b(use)
         omega = T.sqrt(self.norm(a) / self.norm(b))
-        add_to_report(self.name + "_omega", omega)
-        a += T.eye(a.shape[0]) * T.sqrt(self.k) * omega
-        b += T.eye(b.shape[0]) * T.sqrt(self.k) / omega
-        v1 = utils.linear_solve(a, v, "symmetric")
-        v2 = utils.linear_solve(b, v1.T, "symmetric").T
+        add_to_report(self.layer.name + "_omega", omega)
+        a /= omega
+        b *= omega
+        a += T.eye(a.shape[0]) * T.sqrt(self.k)
+        b += T.eye(b.shape[0]) * T.sqrt(self.k)
+        if right_multiply:
+            v1 = utils.linear_solve(b, v, "symmetric")
+            v2 = utils.linear_solve(a, v1.T, "symmetric").T
+        else:
+            v1 = utils.linear_solve(a, v, "symmetric")
+            v2 = utils.linear_solve(b, v1.T, "symmetric").T
         return v2
 
+    def cholesky_product(self, v, use="updates", right_multiply=True):
+        assert v.ndim == 2
+        a, b = self.a(use), self.b(use)
+        c_a = T.slinalg.Cholesky(a)
+        c_b = T.slinalg.Cholesky(b)
+        if right_multiply:
+            return T.dot(T.dot(c_b.T, v), c_a.T)
+        else:
+            return T.dot(T.dot(c_a.T, v), c_b.T)
+
+
+class StandardMatrix(KroneckerFactoredMatrix):
+    def __init__(self,
+                 layer,
+                 a_dim,
+                 b_dim,
+                 params,
+                 a_raw,
+                 b_raw,
+                 n_a=None,
+                 n_b=None,
+                 *args,
+                 **kwargs):
+        super(StandardMatrix, self).__init__(layer, a_dim, b_dim, params,
+                                             *args, **kwargs)
+        self.a_raw = a_raw
+        self.n_a = a_raw.shape[0] if n_a is None else n_a
+        self.b_raw = b_raw
+        self.n_b = b_raw.shape[0] if n_b is None else n_b
+        if self.update_fn is not None:
+            a_upd = self.update_fn(self.persistent_params[0], self.a("raw"))
+            b_upd = self.update_fn(self.persistent_params[1], self.b("raw"))
+            self.updates = [a_upd, b_upd]
+
+    def a(self, use):
+        if use == "persistent":
+            return self.persistent_params[0]
+        elif use == "raw":
+            return self.a_raw
+        elif use == "updates":
+            if self.updates is not None:
+                return self.updates[0]
+            else:
+                return self.a_raw
+        else:
+            raise ValueError("Unrecognized use=" + use)
+
+    def b(self, use):
+        if use == "persistent":
+            return self.persistent_params[1]
+        elif use == "raw":
+            return self.b_raw
+        elif use == "updates":
+            if self.updates is not None:
+                return self.updates[1]
+            else:
+                return self.b_raw
+        else:
+            raise ValueError("Unrecognized use=" + use)
+
+
+class SqrtMatrix(KroneckerFactoredMatrix):
+    def __init__(self,
+                 layer,
+                 a_dim,
+                 b_dim,
+                 params,
+                 a_sqrt,
+                 b_sqrt,
+                 n_a=None,
+                 n_b=None,
+                 *args,
+                 **kwargs):
+        super(SqrtMatrix, self).__init__(layer, a_dim, b_dim, params,
+                                         *args, **kwargs)
+        self.a_sqrt = a_sqrt
+        self.n_a = a_sqrt.shape[0] if n_a is None else n_a
+        self.b_sqrt = b_sqrt
+        self.n_b = b_sqrt.shape[0] if n_b is None else n_b
+        if self.update_fn is not None:
+            a_upd = self.update_fn(self.persistent_params[0], self.a("raw"))
+            b_upd = self.update_fn(self.persistent_params[1], self.b("raw"))
+            self.updates = [a_upd, b_upd]
+
+    def a(self, use):
+        if use == "persistent":
+            return self.persistent_params[0]
+        elif use == "raw":
+            return T.dot(self.a_sqrt.T, self.a_sqrt) / utils.th_fx(self.n_a)
+        elif use == "updates":
+            if self.updates is not None:
+                return self.updates[0]
+            else:
+                return T.dot(self.a_sqrt.T, self.a_sqrt) / utils.th_fx(self.n_a)
+        else:
+            raise ValueError("Unrecognized use=" + use)
+
+    def b(self, use):
+        if use == "persistent":
+            return self.persistent_params[1]
+        elif use == "raw":
+            return T.dot(self.b_sqrt.T, self.b_sqrt) / utils.th_fx(self.n_b)
+        elif use == "updates":
+            if self.updates is not None:
+                return self.updates[1]
+            else:
+                return T.dot(self.b_sqrt.T, self.b_sqrt) / utils.th_fx(self.n_b)
+        else:
+            raise ValueError("Unrecognized use=" + use)
+
+
+class CholeskyMatrix(KroneckerFactoredMatrix):
+    def __init__(self,
+                 layer,
+                 a_dim,
+                 b_dim,
+                 params,
+                 a_cholesky,
+                 b_cholesky,
+                 n_a=None,
+                 n_b=None,
+                 *args,
+                 **kwargs):
+        super(CholeskyMatrix, self).__init__(layer, a_dim, b_dim, params,
+                                             *args, **kwargs)
+        self.a_cholesky = a_cholesky
+        self.n_a = a_cholesky.shape[0] if n_a is None else n_a
+        self.b_cholesky = b_cholesky
+        self.n_b = b_cholesky.shape[0] if n_b is None else n_b
+        if self.update_fn is not None:
+            a_upd = self.update_fn(self.persistent_params[0], self.a("raw"))
+            b_upd = self.update_fn(self.persistent_params[1], self.b("raw"))
+            self.updates = [a_upd, b_upd]
+
+    def a(self, use):
+        if use == "persistent":
+            return self.persistent_params[0]
+        elif use == "raw":
+            return T.dot(self.a_cholesky.T, self.a_cholesky) / utils.th_fx(self.n_a)
+        elif use == "updates":
+            if self.updates is not None:
+                return self.updates[0]
+            else:
+                return T.dot(self.a_cholesky.T, self.a_cholesky) / utils.th_fx(self.n_a)
+        else:
+            raise ValueError("Unrecognized use=" + use)
+
+    def b(self, use):
+        if use == "persistent":
+            return self.persistent_params[1]
+        elif use == "raw":
+            return T.dot(self.b_cholesky.T, self.b_cholesky) / utils.th_fx(self.n_b)
+        elif use == "updates":
+            if self.updates is not None:
+                return self.updates[1]
+            else:
+                return T.dot(self.b_cholesky.T, self.b_cholesky) / utils.th_fx(self.n_b)
+        else:
+            raise ValueError("Unrecognized use=" + use)
+
+    def cholesky_product(self, v, use="updates", right_multiply=True):
+        assert v.ndim == 2
+        if right_multiply:
+            return T.dot(T.dot(self.b_cholesky.T, v), self.a_cholesky.T)
+        else:
+            return T.dot(T.dot(self.a_cholesky.T, v), self.b_cholesky.T)
 
