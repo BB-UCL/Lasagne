@@ -1,9 +1,7 @@
 import lasagne.layers as L
 import numpy as np
-from lasagne.skfgn import optimizer_from_dict
-import theano.tensor as T
+from lasagne.skfgn import optimizer_from_dict, set_fuse_bias
 from lasagne.nonlinearities import tanh, identity
-import lasagne.updates as upd
 import theano
 from bb_datasets import get_dataset
 import time
@@ -66,6 +64,7 @@ def main(dataset="mnist", batch_size=1000, epochs=20, seed=413):
     print("Data-set:", dataset)
     print("Batch size:", batch_size)
     print("Epochs:", epochs)
+    set_fuse_bias(True)
     if seed is not None:
         np.random.seed(seed)
     # Make model
@@ -86,7 +85,7 @@ def main(dataset="mnist", batch_size=1000, epochs=20, seed=413):
     arch = (input_dim, 64, 64, 128, 128)
     in_vars, l_loss = autoencoder(arch, binary=binary)
     # in_vars, l_loss = convae(arch, binary=binary)
-    optim_args = {"variant": "kfra",
+    optim_args = {"variant": "skfgn-rp",
                   "curvature_avg": 0.9,
                   "mirror_avg": 0.9,
                   "random_sampler": "index"}

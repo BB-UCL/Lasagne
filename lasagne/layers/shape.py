@@ -190,7 +190,7 @@ class ReshapeLayer(Layer):
         # Everything else is handled by Theano
         return x.reshape(tuple(output_shape)),
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         assert len(inputs) == len(self.input_shapes)
         assert len(outputs) == self.num_outputs
         assert len(curvature) == self.num_outputs

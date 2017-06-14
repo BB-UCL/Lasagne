@@ -59,7 +59,7 @@ class GaussianParameters(Layer):
         sigma = self.nonlinearity(pre_sigma) + self.eps
         return T.concatenate((mu, sigma), axis=1),
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         assert len(inputs) == 1
         assert len(curvature) == 1
         assert len(outputs) == 1
@@ -149,7 +149,7 @@ class GaussianSampler(Layer):
         else:
             return samples,
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         if self.output_ll:
             raise NotImplementedError
         assert len(inputs) == 1
@@ -285,7 +285,7 @@ class GaussianKL(SKFGNLossLayer):
         kl = 0.5 * T.sum(kl, axis=1)
         return kl,
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         assert len(curvature) == 1
         curvature = curvature[0]
         g_q, g_p = None, None
@@ -473,7 +473,7 @@ class GaussianLikelihood(SKFGNLossLayer):
             log_p_x = - 0.5 * T.log(2 * np.pi) - 0.5 * T.sqr(x)
         return T.sum(log_p_x, axis=1),
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         raise NotImplementedError
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
@@ -504,7 +504,7 @@ class GaussianEntropy(SKFGNLossLayer):
         entropy = T.log(T.constant(2 * np.pi)) / 2.0 + 0.5 + T.log(sigma)
         return T.sum(entropy, axis=1),
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         raise NotImplementedError
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
@@ -576,7 +576,7 @@ class IWAEBound(SKFGNLossLayer):
         s1_cond = s1 - m1.dimshuffle(0, 'x')
         return s0 + m1 + T.log(T.mean(T.exp(s1_cond), axis=1)),
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         raise NotImplementedError
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):

@@ -13,6 +13,16 @@ from .reporting import add_to_report
 
 
 VARIANTS = ("skfgn-rp", "skfgn-fisher", "kfac*", "kfra")
+FUSE_BIAS = False
+
+
+def get_fuse_bias():
+    return FUSE_BIAS
+
+
+def set_fuse_bias(value):
+    global FUSE_BIAS
+    FUSE_BIAS = value
 
 
 class Optimizer(object):
@@ -57,23 +67,28 @@ class Optimizer(object):
             Given the update step produced whether to use the full Gauss-Newton 
             second order expansion to choose the correct step size.
 
-        :param grad_avg: float (default: 0.0)
-            The averaging parameter for the gradient matrices. 
-            If 0, then no averaging will at at each step only the mini-batch matrices will be used.
-        
-        :param curvature_avg: float (default: 0.0)
-            The averaging parameter for the kronecker factors matrices. 
-            If 0, then no averaging will at at each step only the mini-batch matrices will be used.
-        
-        :param mirror_avg: float (default: 0.0)
-            The averaging parameter for the Polyak averaging on the parameters.
-            If 0, then no averaging will be performed and "mirrors" of the parameters
-            will not be created.
-
         :param avg_init_period: int (default: 100)
             An initial period in which the moving average constant for curvature_avg and grad_avg
             grows from 0.1 to the one provided linearly.
-            
+
+        :param grad_avg: float or callable (default: 0.0)
+            The averaging parameter for the gradient matrices. 
+            If 0, then no averaging will at at each step only the mini-batch matrices will be used.
+            If it is a callable it should have the format:
+            f(s_t, x_t, t, init_period)
+
+        :param curvature_avg: float or callable (default: 0.0)
+            The averaging parameter for the kronecker factors matrices. 
+            If 0, then no averaging will at at each step only the mini-batch matrices will be used.
+            If it is a callable it should have the format:
+            f(s_t, x_t, t, init_period)
+        
+        :param mirror_avg: float or callable (default: 0.0)
+            The averaging parameter for the Polyak averaging on the parameters.
+            If 0, then no averaging will be performed and "mirrors" of the parameters
+            will not be created. If it is a callable it should have the format:
+            f(s_t, x_t, t, init_period)
+
         :param clipping: callable or None (default: None)
             Any clipping function to be applied. The function should take two arguments - 
                 the updates produced and the gradients. 
@@ -121,6 +136,7 @@ class Optimizer(object):
         self.gn_momentum = gn_momentum
         self.tikhonov_period = tikhonov_period
         self.debug = debug
+        self._t = None
 
     @property
     def variant(self):
@@ -142,16 +158,16 @@ class Optimizer(object):
     @grad_avg.setter
     def grad_avg(self, value):
         if value is None or value == 0:
-            self._grad_avg = None
+            avg = None
         elif isinstance(value, (int, float, np.ndarray, T.TensorVariable)):
-            def avg(s_t, x_t, t, init_period):
-                return upd.ema(value, s_t, x_t, t, init_period)
-
-            self._grad_avg = avg
+            def avg(s_t, x_t):
+                return upd.ema(value, s_t, x_t, self._t, self.avg_init_period)
         elif callable(value):
-            self._grad_avg = value
+            def avg(s_t, x_t):
+                return value(s_t, x_t, self._t, self.avg_init_period)
         else:
             raise ValueError("Unrecognized type of grad_avg:" + str(type(value)))
+        self._grad_avg = avg
 
     @property
     def curvature_avg(self):
@@ -160,16 +176,16 @@ class Optimizer(object):
     @curvature_avg.setter
     def curvature_avg(self, value):
         if value is None or value == 0:
-            self._curvature_avg = None
+            avg = None
         elif isinstance(value, (int, float, np.ndarray, T.TensorVariable)):
-            def avg(s_t, x_t, t, init_period):
-                return upd.ema(value, s_t, x_t, t, init_period)
-
-            self._curvature_avg = avg
+            def avg(s_t, x_t):
+                return upd.ema(value, s_t, x_t, self._t, self.avg_init_period)
         elif callable(value):
-            self._curvature_avg = value
+            def avg(s_t, x_t):
+                return value(s_t, x_t, self._t, self.avg_init_period)
         else:
             raise ValueError("Unrecognized type of curvature_avg:" + str(type(value)))
+        self._curvature_avg = avg
 
     @property
     def mirror_avg(self):
@@ -178,16 +194,16 @@ class Optimizer(object):
     @mirror_avg.setter
     def mirror_avg(self, value):
         if value is None or value == 0:
-            self._mirror_avg = None
+            avg = None
         elif isinstance(value, (int, float, np.ndarray, T.TensorVariable)):
-            def avg(s_t, x_t, t, init_period):
-                return upd.ema(value, s_t, x_t, t, init_period)
-
-            self._mirror_avg = avg
+            def avg(s_t, x_t):
+                return upd.ema(value, s_t, x_t, self._t, self.avg_init_period)
         elif callable(value):
-            self._mirror_avg = value
+            def avg(s_t, x_t):
+                return value(s_t, x_t, self._t, self.avg_init_period)
         else:
             raise ValueError("Unrecognized type of mirror_avg:" + str(type(value)))
+        self._mirror_avg = avg
 
     def __call__(self, loss_layer,
                  l2_reg=None,
@@ -196,6 +212,10 @@ class Optimizer(object):
                  treat_as_input=None,
                  return_mirror_map=True,
                  return_loss=True):
+        t_was_none = self._t is None
+        if t_was_none:
+            self._t = theano.shared(np.asarray(0, dtype=np.int64), name="skfgn_t")
+
         # Get parameters
         if params is None:
             params = get_all_params(loss_layer, trainable=True)
@@ -219,12 +239,15 @@ class Optimizer(object):
         grads = upd.get_or_compute_grads(loss, params)
 
         # Make a mapping from parameters to their gradients
-        steps_map = OrderedDict((p, g) for p, g in zip(params, grads))
+        grads_map = OrderedDict((p, g) for p, g in zip(params, grads))
+
+        # Calculate all of the Kronecker-Factored matrices
+        kf_matrices = self.curvature_propagation(loss_layer, 1,
+                                                 inputs_map, outputs_map,
+                                                 treat_as_input)
 
         # Calculate the SKFGN steps and all extra necessary updates
-        initial_steps, extra_updates, t = self.skfgn(loss_layer, steps_map,
-                                                     inputs_map, outputs_map,
-                                                     treat_as_input)
+        initial_steps, extra_updates = self.skfgn_steps(grads_map, kf_matrices)
 
         # If using gn_momentum we need to create velocity vectors
         def gauss_newton_product(v1, v2=None):
@@ -290,7 +313,7 @@ class Optimizer(object):
                                              trainable=False,
                                              regularizable=False,
                                              mirror=True)
-                        updates[mirror] = self.mirror_avg(mirror, updates[w], t, self.avg_init_period)
+                        updates[mirror] = self.mirror_avg(mirror, updates[w])
                         mirror_map[w] = mirror
                         if self.debug:
                             print("Adding", mirror.name, "to updates and mirror map.")
@@ -299,6 +322,9 @@ class Optimizer(object):
         else:
             for w in params:
                 mirror_map[w] = w
+        # Reset t
+        if t_was_none:
+            self._t = None
 
         if return_mirror_map and return_loss:
             return updates, mirror_map, loss
@@ -309,35 +335,99 @@ class Optimizer(object):
         else:
             return updates
 
-    def skfgn(self, loss_layer, grads_map, inputs_map, outputs_map,
-              loss_grad=None, treat_as_input=None):
-        loss_grad = 1 if loss_grad is None else loss_grad
-        curvature_map = dict()
-        input_curvature = dict()
-
-        steps_map = OrderedDict()
+    def skfgn_steps(self, grads_map, kf_matrices):
+        # Create any extra updates
         extra_updates = OrderedDict()
-        t = theano.shared(np.asarray(0, dtype=np.int64), name="skfgn_t")
-        extra_updates[t] = t + 1
-        t = utils.th_fx(extra_updates[t])
+        extra_updates[self._t] = self._t + 1
 
-        def kronecker_inversion(owning_layer, params, q, g):
-            if isinstance(params, (list, tuple)):
-                grads = [grads_map[p] for p in params]
+        # Compute and return the new steps
+        steps_map = OrderedDict()
+        for mat in kf_matrices:
+            # Add the updates for the Kronecker-Factored matrices
+            extra_updates.update(mat.get_updates())
+            grads = []
+            if self.grad_avg is not None:
+                for p in mat.params:
+                    grad_avg = theano.shared(T.zeros_like(p).eval(), name=p.name + "_avg")
+                    grads.append(self.grad_avg(grad_avg, grads_map[p]))
+                    extra_updates[grad_avg] = grads[-1]
             else:
-                grads = grads_map[params]
-            self.kronecker_inversion(owning_layer, params, q, g, grads,
-                                     steps_map,  t, extra_updates)
+                grads = [grads_map[p] for p in mat.params]
+
+            # Combine grads
+            if len(mat.params) == 1:
+                grad = grads[0]
+            elif len(mat.params) == 2:
+                w, b = mat.params
+                if w.ndim == 2:
+                    # FF layer equivalent
+                    grads[1] = T.reshape(grads[1], (1, -1))
+                    grad = T.concatenate(grads, axis=0)
+                else:
+                    raise NotImplementedError
+                pass
+            else:
+                raise ValueError("Currently only a matrix and bias supported.")
+            # Solve the linear system
+            joint_step = mat.linear_solve(grad)
+            if len(mat.params) == 1:
+                steps = [joint_step]
+            else:
+                w, b = mat.params
+                if w.ndim == 2:
+                    # FF layer equivalent
+                    steps = [joint_step[:-1], joint_step[-1]]
+                else:
+                    raise NotImplementedError
+                pass
+            for p, step in zip(mat.params, steps):
+                steps_map[p] = step
+        steps = []
+        for w, g in grads_map.items():
+            if steps_map.get(w) is None:
+                print("Parameter", w, "was not update with SKFGN, falling back to just gradient")
+            steps.append(steps_map.get(w, g))
+
+        self._t = None
+        return steps, extra_updates
+
+    def curvature_propagation(self, loss_layer, loss_grad=None,
+                              inputs_map=None, outputs_map=None,
+                              treat_as_input=None):
+        if loss_grad is None:
+            loss_grad = 1
+        if inputs_map is None or outputs_map is None:
+            _, inputs_map, outputs_map = get_output(loss_layer, get_maps=True)
+        # List of all the Kronecker-Factored matrices
+        kf_matrices = list()
+
+        # Helper function to create Kronecker-Factored matrices
+        if self.variant == "kfra":
+            def make_matrix(owning_layer, a_dim, b_dim, a, b, params):
+                kf_mat = StandardMatrix(owning_layer, a_dim, b_dim, a, b,
+                                        params, k=self.tikhonov_damping,
+                                        update_fn=self.curvature_avg)
+                kf_matrices.append(kf_mat)
+        else:
+            def make_matrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt, params):
+                kf_mat = SqrtMatrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt,
+                                    params, k=self.tikhonov_damping,
+                                    update_fn=self.curvature_avg)
+                kf_matrices.append(kf_mat)
+
         if self.debug:
             print("Running SKFGN with variant", self.variant)
+        # Mapping from layer to propagated curvature
+        curvature_map = dict()
+        # Mapping from layer to incoming curvature
+        input_curvature = dict()
         # Start from the loss layer
         curvature_map[loss_layer] = [loss_grad]
         all_layers = get_all_layers(loss_layer, treat_as_input)
-        if self.debug:
-            print("Performing SKFGN backprop")
         for layer in reversed(all_layers):
             if self.debug:
                 print(layer.name)
+            # For input layers nothing to compute
             if isinstance(layer, InputLayer):
                 input_curvature[layer] = curvature_map[layer]
                 continue
@@ -346,10 +436,12 @@ class Optimizer(object):
             inputs = inputs_map[layer]
             outputs = outputs_map[layer]
             curvature = curvature_map[layer]
-            curvature = layer.skfgn(self, inputs, outputs, curvature, kronecker_inversion)
+
+            # Propagate the curvature
+            curvature = layer.curvature_propagation(self, inputs, outputs, curvature, make_matrix)
             assert len(curvature) == len(layer.input_layers)
 
-            # Assign the output curvature to the corresponding layers
+            # Assign the propagated curvature to the corresponding layers
             c = 0
             for i, l in enumerate(layer.input_layers):
                 current_curvature = curvature[c: c + l.num_outputs]
@@ -358,83 +450,7 @@ class Optimizer(object):
                 else:
                     curvature_map[l] = current_curvature
 
-        steps = []
-        for w, g in grads_map.items():
-            steps.append(steps_map.get(w, g))
-            if steps_map.get(w) is None:
-                print("Parameter", w, "was not update with SKFGN, falling back to just gradient")
-        return steps, extra_updates, t
-
-    def kronecker_inversion(self, layer, w, q, g, grad, steps_map, t, updates):
-        b = None
-        name = w.name.split(utils.SCOPE_DELIMITER)[-1]
-        if isinstance(w, (tuple, list)):
-            assert len(w) == 2
-            assert len(grad) == 2
-            w, b = w
-            grad = T.concatenate((grad[0], grad[1].reshape((1, -1))), axis=0)
-            name += "_fused"
-        if w.ndim != 2:
-            raise ValueError("Currently SKFGN is implemented only for matrix parameters."
-                             "Try absorbing the bias in the weight matrix via 'fused_bias=True'")
-        q_dim, g_dim = w.shape.eval()
-        if b is not None:
-            q_dim += 1
-
-        # Curvature smoothing/momentum
-        if self.curvature_avg is not None:
-            q_avg = layer.add_param(utils.floatX(np.eye(q_dim) * self.tikhonov_damping),
-                                    (q_dim, q_dim),
-                                    name=name + "_q",
-                                    broadcast_unit_dims=False,
-                                    trainable=False,
-                                    regularizable=False,
-                                    skfgn=True)
-            g_avg = layer.add_param(utils.floatX(np.eye(g_dim) * self.tikhonov_damping),
-                                    (g_dim, g_dim),
-                                    name=name + "_g",
-                                    broadcast_unit_dims=False,
-                                    trainable=False,
-                                    regularizable=False,
-                                    skfgn=True)
-            q = self.curvature_avg(q_avg, q, t, self.avg_init_period)
-            g = self.curvature_avg(g_avg, g, t, self.avg_init_period)
-            updates[q_avg] = q
-            updates[g_avg] = g
-
-        # Gradient smoothing/momentum
-        if self.grad_avg is not None:
-            grad_avg = layer.add_param(utils.floatX(np.zeros((q_dim, g_dim))),
-                                       (q_dim, g_dim),
-                                       name=name + "_grad",
-                                       broadcast_unit_dims=False,
-                                       trainable=False,
-                                       regularizable=False,
-                                       stats=True)
-            grad = self.curvature_avg(grad_avg, grad, t, self.avg_init_period)
-            updates[grad_avg] = grad
-        if q_dim == 0 and g_dim == 0:
-            step = grad / (q + g + self.tikhonov_damping)
-        elif q_dim == 0:
-            g += T.eye(g_dim) * self.tikhonov_damping
-            step = utils.linear_solve(g, grad.T, "symmetric").T / q
-        elif g_dim == 0:
-            q += T.eye(q_dim) * self.tikhonov_damping
-            step = utils.linear_solve(q, grad, "symmetric") / g
-        elif self.exact_inversion:
-            raise NotImplementedError
-        else:
-            omega = T.sqrt(self.norm(q) / self.norm(g))
-            add_to_report(w.name + "_omega", omega)
-            q += T.eye(q_dim) * T.sqrt(self.tikhonov_damping) * omega
-            g += T.eye(g_dim) * T.sqrt(self.tikhonov_damping) / omega
-            step = utils.linear_solve(q, grad, "symmetric")
-            step = utils.linear_solve(g, step.T, "symmetric").T
-        if b is None:
-            steps_map[w] = step
-        else:
-            steps_map[w] = step[:-1]
-            steps_map[b] = step[-1]
+        return kf_matrices
 
     def gn_rescale(self, gauss_newton_product, grads, steps1, steps2=None):
         # The second order Taylor expansion of f(x) gives us:
@@ -657,7 +673,6 @@ class KroneckerFactoredMatrix(object):
                  a_dim,
                  b_dim,
                  params,
-                 persistent=True,
                  k=1e-3,
                  update_fn=None,
                  norm=utils.mean_trace_norm):
@@ -668,40 +683,50 @@ class KroneckerFactoredMatrix(object):
         self.k = k
         self.update_fn = update_fn
         self.norm = norm
-        self.persistent_params = None if not persistent else \
+        if update_fn is not None:
             self.make_persistent()
+        else:
+            self.a_persistent = None
+            self.b_persistent = None
 
     def make_persistent(self):
-        a_persistent = self.layer.add_param(
+        self.a_persistent = self.layer.add_param(
             utils.floatX(np.eye(self.a_dim) * self.k),
             (self.a_dim, self.a_dim),
-            name=self.layer + "KF_A",
+            name="KF_A",
             broadcast_unit_dims=False,
             trainable=False,
             regularizable=False,
             kf=True)
-        b_persistent = self.layer.add_param(
-            utils.floatX(np.eye(self.a_dim) * self.k),
-            (self.a_dim, self.a_dim),
-            name=self.layer + "KF_B",
+        self.b_persistent = self.layer.add_param(
+            utils.floatX(np.eye(self.b_dim) * self.k),
+            (self.b_dim, self.b_dim),
+            name="KF_B",
             broadcast_unit_dims=False,
             trainable=False,
             regularizable=False,
             kf=True)
-        return a_persistent, b_persistent
 
     def a(self, use):
+        assert use in ("updates", "raw", "persistent")
         if use == "persistent":
-            return self.persistent_params[0]
+            return self.a_persistent
         else:
             raise NotImplementedError
 
     def b(self, use):
         assert use in ("updates", "raw", "persistent")
         if use == "persistent":
-            return self.persistent_params[1]
+            return self.b_persistent
         else:
             raise NotImplementedError
+
+    def get_updates(self):
+        if self.a_persistent is None:
+            return ()
+        else:
+            return (self.a_persistent, self.a("updates")), \
+                   (self.b_persistent, self.b("updates"))
 
     def linear_solve(self, v, use="updates", right_multiply=True):
         assert v.ndim == 2
@@ -736,27 +761,23 @@ class StandardMatrix(KroneckerFactoredMatrix):
                  layer,
                  a_dim,
                  b_dim,
-                 params,
                  a_raw,
                  b_raw,
-                 n_a=None,
-                 n_b=None,
+                 params,
                  *args,
                  **kwargs):
         super(StandardMatrix, self).__init__(layer, a_dim, b_dim, params,
                                              *args, **kwargs)
         self.a_raw = a_raw
-        self.n_a = a_raw.shape[0] if n_a is None else n_a
         self.b_raw = b_raw
-        self.n_b = b_raw.shape[0] if n_b is None else n_b
         if self.update_fn is not None:
-            a_upd = self.update_fn(self.persistent_params[0], self.a("raw"))
-            b_upd = self.update_fn(self.persistent_params[1], self.b("raw"))
+            a_upd = self.update_fn(self.a_persistent, self.a("raw"))
+            b_upd = self.update_fn(self.b_persistent, self.b("raw"))
             self.updates = [a_upd, b_upd]
 
     def a(self, use):
         if use == "persistent":
-            return self.persistent_params[0]
+            return self.a_persistent
         elif use == "raw":
             return self.a_raw
         elif use == "updates":
@@ -769,7 +790,7 @@ class StandardMatrix(KroneckerFactoredMatrix):
 
     def b(self, use):
         if use == "persistent":
-            return self.persistent_params[1]
+            return self.b_persistent
         elif use == "raw":
             return self.b_raw
         elif use == "updates":
@@ -786,9 +807,9 @@ class SqrtMatrix(KroneckerFactoredMatrix):
                  layer,
                  a_dim,
                  b_dim,
-                 params,
                  a_sqrt,
                  b_sqrt,
+                 params,
                  n_a=None,
                  n_b=None,
                  *args,
@@ -800,13 +821,13 @@ class SqrtMatrix(KroneckerFactoredMatrix):
         self.b_sqrt = b_sqrt
         self.n_b = b_sqrt.shape[0] if n_b is None else n_b
         if self.update_fn is not None:
-            a_upd = self.update_fn(self.persistent_params[0], self.a("raw"))
-            b_upd = self.update_fn(self.persistent_params[1], self.b("raw"))
+            a_upd = self.update_fn(self.a_persistent, self.a("raw"))
+            b_upd = self.update_fn(self.b_persistent, self.b("raw"))
             self.updates = [a_upd, b_upd]
 
     def a(self, use):
         if use == "persistent":
-            return self.persistent_params[0]
+            return self.a_persistent
         elif use == "raw":
             return T.dot(self.a_sqrt.T, self.a_sqrt) / utils.th_fx(self.n_a)
         elif use == "updates":
@@ -819,7 +840,7 @@ class SqrtMatrix(KroneckerFactoredMatrix):
 
     def b(self, use):
         if use == "persistent":
-            return self.persistent_params[1]
+            return self.b_persistent
         elif use == "raw":
             return T.dot(self.b_sqrt.T, self.b_sqrt) / utils.th_fx(self.n_b)
         elif use == "updates":
@@ -836,9 +857,9 @@ class CholeskyMatrix(KroneckerFactoredMatrix):
                  layer,
                  a_dim,
                  b_dim,
-                 params,
                  a_cholesky,
                  b_cholesky,
+                 params,
                  n_a=None,
                  n_b=None,
                  *args,
@@ -850,13 +871,13 @@ class CholeskyMatrix(KroneckerFactoredMatrix):
         self.b_cholesky = b_cholesky
         self.n_b = b_cholesky.shape[0] if n_b is None else n_b
         if self.update_fn is not None:
-            a_upd = self.update_fn(self.persistent_params[0], self.a("raw"))
-            b_upd = self.update_fn(self.persistent_params[1], self.b("raw"))
+            a_upd = self.update_fn(self.a_persistent, self.a("raw"))
+            b_upd = self.update_fn(self.b_persistent, self.b("raw"))
             self.updates = [a_upd, b_upd]
 
     def a(self, use):
         if use == "persistent":
-            return self.persistent_params[0]
+            return self.a_persistent
         elif use == "raw":
             return T.dot(self.a_cholesky.T, self.a_cholesky) / utils.th_fx(self.n_a)
         elif use == "updates":
@@ -869,7 +890,7 @@ class CholeskyMatrix(KroneckerFactoredMatrix):
 
     def b(self, use):
         if use == "persistent":
-            return self.persistent_params[1]
+            return self.b_persistent
         elif use == "raw":
             return T.dot(self.b_cholesky.T, self.b_cholesky) / utils.th_fx(self.n_b)
         elif use == "updates":

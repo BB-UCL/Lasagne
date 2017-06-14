@@ -665,7 +665,7 @@ class Conv2DLayer(BaseConvLayer):
     #     y2 = y2.reshape((y.shape[0], y.shape[2], y.shape[3], y.shape[1])).dimshuffle(0, 3, 1, 2)
     #     print(T.sum(y - activation).eval(), T.sum(y - y2).eval())
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         assert len(inputs) == 1
         assert len(curvature) == 1
         assert len(outputs) == 1

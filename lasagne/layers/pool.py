@@ -283,7 +283,7 @@ class Pool2DLayer(Layer):
                          )
         return pooled,
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         assert len(inputs) == 1
         assert len(outputs) == 1
         assert len(curvature) == 1

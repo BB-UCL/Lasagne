@@ -4,7 +4,7 @@ import theano.tensor as T
 from .. import init
 from .. import nonlinearities
 from ..utils import th_fx, dfs_path
-from ..skfgn import SqrtMatrix, StandardMatrix
+from ..skfgn import get_fuse_bias
 
 from .base import Layer
 
@@ -82,13 +82,13 @@ class DenseLayer(Layer):
     def __init__(self, incoming, num_units, W=init.GlorotUniform(),
                  b=init.Constant(0.), nonlinearity=nonlinearities.rectify,
                  num_leading_axes=1,
-                 fused_bias=True, invariant_axes=(2, 3), **kwargs):
+                 fuse_bias=None, invariant_axes=(2, 3), **kwargs):
         super(DenseLayer, self).__init__(incoming, **kwargs)
         self.nonlinearity = (nonlinearities.identity if nonlinearity is None
                              else nonlinearity)
 
         self.num_units = num_units
-        self.fused_bias = fused_bias
+        self.fuse_bias = get_fuse_bias() if fuse_bias is None else fuse_bias
         self.invariant_axes = invariant_axes
         if num_leading_axes >= len(self.input_shape):
             raise ValueError(
@@ -114,7 +114,7 @@ class DenseLayer(Layer):
                                     broadcast_unit_dims=False)
             self.b = None
             self.W_fused = None
-        elif fused_bias:
+        elif self.fuse_bias:
             self.W_fused = self.add_param(W, (num_inputs + 1, num_units), name="W_fused",
                                           broadcast_unit_dims=False)
             b_val = b.sample((1, num_units))
@@ -148,23 +148,16 @@ class DenseLayer(Layer):
 
         if self.b is None:
             activation = T.dot(x, self.W)
-        elif self.fused_bias:
+        elif self.fuse_bias:
             x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
             activation = T.dot(x, self.W_fused)
         else:
             activation = T.dot(x, self.W) + self.b.dimshuffle('x', 0)
         return self.nonlinearity(activation),
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
-        assert len(inputs) == 1
-        assert len(curvature) == 1
-        assert len(outputs) == 1
-
-        # Extract the activation of the layer
-        if self.b is None or self.fused_bias:
-            path = dfs_path(outputs[0], self.W_fused)
-        else:
-            path = dfs_path(outputs[0], self.W)
+    def fetch_activation(self, output):
+        w = self.W_fused if self.b is None or self.fuse_bias else self.W
+        path = dfs_path(output, w)
         index = None
         for i in reversed(range(len(path))):
             if path[i].owner is not None and isinstance(path[i].owner.op, T.basic.Dot):
@@ -172,27 +165,32 @@ class DenseLayer(Layer):
                 break
         if index is None:
             raise ValueError("Did not manage to find Dot?")
-        if self.b is not None and not self.fused_bias:
-            index += 1
-        activation = path[index]
+        if self.b is not None and not self.fuse_bias:
+            index -= 1
+        return path[index]
+
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
+        assert len(inputs) == 1
+        assert len(curvature) == 1
+        assert len(outputs) == 1
+
+        # Extract the activation of the layer
+        activation = self.fetch_activation(outputs[0])
         # Extract info and calculate Q
         x = self.transform_x(inputs[0])
         curvature = curvature[0]
         x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
-        n = th_fx(x.shape[0])
-        q = T.dot(x.T, x) / n
+        q_dim, g_dim = self.W_fused.shape.eval()
         if optimizer.variant == "kfra":
+            n = th_fx(x.shape[0])
+            q = T.dot(x.T, x) / n
             # Propagate curvature trough the nonlinearity and calculate the activation GN
             if self.nonlinearity != nonlinearities.identity:
                 a = T.Lop(outputs[0], activation, T.ones_like(outputs[0]))
                 g = curvature * T.dot(a.T, a) / n
             else:
                 g = curvature
-            if self.b is None or self.fused_bias:
-                # In this cases it is simple
-                kronecker_inversion(self, self.W_fused, q, g)
-            else:
-                kronecker_inversion(self, (self.W, self.b), q, g)
+            make_matrix(self, g_dim, q_dim, g, q, self.get_params())
             if len(self.input_shapes[0]) > 2:
                 if self.invariant_axes != (2, 3):
                     raise ValueError("You are using KFRA on a dense layer with an input of size more than 2D."
@@ -208,19 +206,8 @@ class DenseLayer(Layer):
             # Propagate curvature trough the nonlinearity and calculate the activation GN
             if self.nonlinearity != nonlinearities.identity:
                 curvature = T.Lop(outputs[0], activation, curvature)
-
-            b_dim, a_dim = self.W_fused.shape.eval()
-            kf_mat = SqrtMatrix(self, b_dim, a_dim, self.get_params(),
-                                a_sqrt=curvature, b_sqrt=x,
-                                k=optimizer.tikhonov_damping)
-
-            g = T.dot(curvature.T, curvature) / n
-            if self.b is None or self.fused_bias:
-                # In this cases it is simple
-                kronecker_inversion(self, self.W_fused, q, g)
-            else:
-                kronecker_inversion(self, (self.W, self.b), q, g)
-            return T.Lop(outputs[0], inputs[0], curvature),
+            make_matrix(self, g_dim, q_dim, curvature, x, self.get_params())
+            return T.Lop(activation, inputs[0], curvature),
 
 
 class NINLayer(Layer):

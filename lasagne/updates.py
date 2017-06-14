@@ -189,6 +189,7 @@ def exponential_moving_average(alpha, s_t, x_t, t=None, init_period=None):
     -------
     The state of the system at time t + 1.
     """
+    alpha = utils.th_fx(alpha)
     if t is not None and init_period is not None and init_period > 0:
         p = utils.th_fx(init_period)
         t = utils.th_fx(t)

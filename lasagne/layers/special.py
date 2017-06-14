@@ -51,15 +51,18 @@ class NonlinearityLayer(Layer):
     def get_outputs_for(self, inputs, **kwargs):
         return self.nonlinearity(inputs[0]),
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         assert len(inputs) == 1
         assert len(curvature) == 1
         assert len(outputs) == 1
 
         if optimizer.variant == "kfra":
-            n = th_fx(inputs[0].shape[0])
-            a = T.Lop(outputs[0], inputs[0], T.ones_like(outputs[0]))
-            return curvature * T.dot(a.T, a) / n,
+            if self.nonlinearity != nonlinearities.identity:
+                n = th_fx(inputs[0].shape[0])
+                a = T.Lop(outputs[0], inputs[0], T.ones_like(outputs[0]))
+                return curvature * T.dot(a.T, a) / n,
+            else:
+                return curvature,
         else:
             return T.Lop(outputs[0], inputs[0], curvature[0]),
 

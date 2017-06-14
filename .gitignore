@@ -100,3 +100,5 @@ Temporary Items
 
 # Directories from IDE
 .idea
+examples/vae_template.json
+examples/vae_template.py

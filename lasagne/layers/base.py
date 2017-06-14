@@ -343,7 +343,7 @@ class Layer(object):
         self._prefix = value
         self.name = self._name
 
-    def skfgn(self, optimizer, inputs, outputs, curvature, kronecker_inversion):
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         """
         Stochastic Kronecker-Factored Gauss-Newton
         
@@ -376,7 +376,7 @@ class Layer(object):
                 w - the parameter
                 q - current mini-batch estimate of Q
                 g - current mini-batch estimate of G
-        
+
         Returns
         -------
         Theano expressions for the Gauss-Newton matrices with respect to the 
