@@ -3,7 +3,7 @@ import theano.tensor as T
 
 from .. import init
 from .. import nonlinearities
-from ..utils import th_fx, dfs_path
+from ..utils import th_fx, fetch_pre_activation
 from ..skfgn import get_fuse_bias
 
 from .base import Layer
@@ -113,7 +113,7 @@ class DenseLayer(Layer):
             self.W = self.add_param(W, (num_inputs, num_units), name="W",
                                     broadcast_unit_dims=False)
             self.b = None
-            self.W_fused = None
+            self.W_fused = self.params_to_fused((self.W, ))
         elif self.fuse_bias:
             self.W_fused = self.add_param(W, (num_inputs + 1, num_units), name="W_fused",
                                           broadcast_unit_dims=False)
@@ -121,14 +121,13 @@ class DenseLayer(Layer):
             w_val = self.W_fused.get_value()
             w_val[-1] = b_val
             self.W_fused.set_value(w_val)
-            self.W = self.W_fused[:-1]
-            self.b = self.W_fused[-1]
+            self.W, self.b = self.params_from_fused(self.W_fused, 2)
         else:
             self.W = self.add_param(W, (num_inputs, num_units), name="W",
                                     broadcast_unit_dims=False)
             self.b = self.add_param(b, (num_units,), name="b",
                                     regularizable=False)
-            self.W_fused = T.concatenate((self.W, self.b.reshape((1, -1))), axis=0)
+            self.W_fused = self.params_to_fused((self.W, self.b))
 
     def get_output_shapes_for(self, input_shapes):
         input_shape = input_shapes[0]
@@ -155,27 +154,26 @@ class DenseLayer(Layer):
             activation = T.dot(x, self.W) + self.b.dimshuffle('x', 0)
         return self.nonlinearity(activation),
 
-    def fetch_activation(self, output):
-        w = self.W_fused if self.b is None or self.fuse_bias else self.W
-        path = dfs_path(output, w)
-        index = None
-        for i in reversed(range(len(path))):
-            if path[i].owner is not None and isinstance(path[i].owner.op, T.basic.Dot):
-                index = i
-                break
-        if index is None:
-            raise ValueError("Did not manage to find Dot?")
-        if self.b is not None and not self.fuse_bias:
-            index -= 1
-        return path[index]
+    def params_to_fused(self, params):
+        if len(params) == 1:
+            return params[0]
+        else:
+            return T.concatenate((params[0], T.reshape(params[1], (1, -1))), axis=0)
+
+    def params_from_fused(self, fused, num):
+        if num == 1:
+            return fused,
+        else:
+            return fused[:-1], fused[-1]
 
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         assert len(inputs) == 1
         assert len(curvature) == 1
         assert len(outputs) == 1
 
-        # Extract the activation of the layer
-        activation = self.fetch_activation(outputs[0])
+        # Extract the pre-activation of the layer - W * x + b
+        bias = self.b is not None and not self.fuse_bias
+        activation = fetch_pre_activation(outputs[0], inputs[0], T.basic.Dot, bias)
         # Extract info and calculate Q
         x = self.transform_x(inputs[0])
         curvature = curvature[0]

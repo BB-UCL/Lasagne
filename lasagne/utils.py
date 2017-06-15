@@ -892,6 +892,37 @@ def dfs_path(f, w):
     raise ValueError("Did not find the variable {} in the graph.".format(str(w)))
 
 
+def fetch_pre_activation(f, x, op, bias=False):
+    """
+    Returns the pre-activation of a layer given its output f and input x
+    Parameters
+    ----------
+
+    f : TensorVariable
+        The output of the layer
+
+    x : TensorVariable
+        The input of the layer
+
+    op : Class type
+        The main activation type of the operator (e.g. Dot or AbstractConv2D)
+
+    bias :
+        Whether the layers has a separate bias.
+    Returns
+    -------
+    A theano expression for the pre-activation Wx + b
+    """
+    path = dfs_path(f, x)
+    for i in reversed(range(len(path))):
+        if path[i].owner is not None and isinstance(path[i].owner.op, op):
+            if bias:
+                return path[i - 1]
+            else:
+                return path[i]
+    raise ValueError("Did not manage to find operator:" + str(op))
+
+
 def set_parameters(params, value_mapping, verbose=True):
     """
     Sets the values of the Theano shared variables parameters

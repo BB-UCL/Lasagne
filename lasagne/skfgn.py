@@ -37,7 +37,7 @@ class Optimizer(object):
                  curvature_avg=0.0,
                  mirror_avg=0.0,
                  alpha_avg=0.0,
-                 alpha_period=1,
+                 alpha_period=10,
                  avg_init_period=100,
                  clipping=None,
                  learning_rate=1.0,
@@ -195,7 +195,7 @@ class Optimizer(object):
 
     @property
     def alpha_avg(self):
-        return self._curvature_avg
+        return self._alpha_avg
 
     @alpha_avg.setter
     def alpha_avg(self, value):
@@ -300,11 +300,11 @@ class Optimizer(object):
             # Alpha averaging only on certain iterations
             if self.alpha_avg is not None:
                 cond1 = T.le(self._t, self.avg_init_period)
-                cond2 = T.mod(self._t, self.alpha_period)
+                cond2 = T.eq(T.mod(self._t, self.alpha_period), 0)
                 cond = T.or_(cond1, cond2)
                 alpha_avg = theano.shared(utils.floatX(0.0001), name="skfgn_alpha_avg")
                 alpha = self.alpha_avg(alpha_avg, alpha)
-                r, alpha = ifelse(cond, (r, alpha), (0, alpha_avg))
+                r, alpha = ifelse(cond, (r, alpha), (utils.th_fx(0), alpha_avg))
                 extra_updates[alpha_avg] = alpha
                 add_to_report("skfgn_alpha", alpha)
                 add_to_report("skfgn_reduction", r)
@@ -393,32 +393,18 @@ class Optimizer(object):
             else:
                 grads = [grads_map[p] for p in mat.params]
 
-            # Combine grads
-            if len(mat.params) == 1:
+            # Multiply the gradients by the inverse Gauss-Newton
+            if get_fuse_bias():
                 grad = grads[0]
-            elif len(mat.params) == 2:
-                w, b = mat.params
-                if w.ndim == 2:
-                    # FF layer equivalent
-                    grads[1] = T.reshape(grads[1], (1, -1))
-                    grad = T.concatenate(grads, axis=0)
-                else:
-                    raise NotImplementedError
-                pass
             else:
-                raise ValueError("Currently only a matrix and bias supported.")
-            # Solve the linear system
+                grad = mat.layer.params_to_fused(grads)
             joint_step = mat.linear_solve(grad)
-            if len(mat.params) == 1:
+            if get_fuse_bias():
                 steps = [joint_step]
             else:
-                w, b = mat.params
-                if w.ndim == 2:
-                    # FF layer equivalent
-                    steps = [joint_step[:-1], joint_step[-1]]
-                else:
-                    raise NotImplementedError
-                pass
+                steps = mat.layer.params_from_fused(joint_step, len(mat.params))
+
+            # Exchange the steps in the steps map
             for p, step in zip(mat.params, steps):
                 steps_map[p] = step
         steps = []
@@ -427,7 +413,6 @@ class Optimizer(object):
                 print("Parameter", w, "was not update with SKFGN, falling back to just gradient")
             steps.append(steps_map.get(w, g))
 
-        self._t = None
         return steps, extra_updates
 
     def curvature_propagation(self, loss_layer, loss_grad=None,
@@ -442,16 +427,18 @@ class Optimizer(object):
 
         # Helper function to create Kronecker-Factored matrices
         if self.variant == "kfra":
-            def make_matrix(owning_layer, a_dim, b_dim, a, b, params):
+            def make_matrix(owning_layer, a_dim, b_dim, a, b, params, **kwargs):
                 kf_mat = StandardMatrix(owning_layer, a_dim, b_dim, a, b,
                                         params, k=self.tikhonov_damping,
-                                        update_fn=self.curvature_avg)
+                                        update_fn=self.curvature_avg,
+                                        **kwargs)
                 kf_matrices.append(kf_mat)
         else:
-            def make_matrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt, params):
+            def make_matrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt, params, **kwargs):
                 kf_mat = SqrtMatrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt,
                                     params, k=self.tikhonov_damping,
-                                    update_fn=self.curvature_avg)
+                                    update_fn=self.curvature_avg,
+                                    **kwargs)
                 kf_matrices.append(kf_mat)
 
         if self.debug:
@@ -515,7 +502,6 @@ class Optimizer(object):
             M = G + kI
             # M = theano_print_vals(M, "M")
             alpha = v / M
-            # alpha = theano_print_vals(alpha, "alpha")
             reduction = alpha * v / 2.0
             return reduction, alpha
         else:

@@ -1,11 +1,12 @@
 import theano.tensor as T
 from theano.tensor.nnet.neighbours import images2neibs
+from theano.tensor.nnet.abstract_conv import AbstractConv2d
 
 from .. import init
 from .. import nonlinearities
-from ..utils import as_tuple
+from ..utils import as_tuple, th_fx, fetch_pre_activation
 from ..theano_extensions import conv
-from ..utils import th_fx, dfs_path
+from ..skfgn import get_fuse_bias
 
 
 from .base import Layer
@@ -266,7 +267,7 @@ class BaseConvLayer(Layer):
                  untie_biases=False,
                  W=init.GlorotUniform(), b=init.Constant(0.),
                  nonlinearity=nonlinearities.rectify, flip_filters=True,
-                 fused_bias=True, n=None, **kwargs):
+                 fused_bias=None, n=None, **kwargs):
         super(BaseConvLayer, self).__init__(incoming, **kwargs)
         if nonlinearity is None:
             self.nonlinearity = nonlinearities.identity
@@ -298,22 +299,24 @@ class BaseConvLayer(Layer):
         else:
             self.pad = as_tuple(pad, n, int)
 
-        self.fused_bias = fused_bias
-        if fused_bias:
+        self.fuse_bias = get_fuse_bias() if fused_bias is None else fused_bias
+        if self.fuse_bias:
             w_shape = self.get_W_shape()
             if b is None:
                 self.W_fused = self.add_param(W, (w_shape[1] * w_shape[2] * w_shape[3], w_shape[0]), name="W")
-                self.W, self.b = BaseConvLayer.from_fused(self.W_fused, w_shape, self.flip_filters, False)
+                self.b = None
+                self.W,  = self.params_from_fused(self.W_fused, 1)
             elif self.untie_biases:
                 raise ValueError("Can not fuse biases and untie them.")
             else:
                 w_fuse_shape = (w_shape[1] * w_shape[2] * w_shape[3] + 1, w_shape[0])
                 self.W_fused = self.add_param(W, w_fuse_shape, name="W_fused")
-                self.W, self.b = BaseConvLayer.from_fused(self.W_fused, w_shape, self.flip_filters, True)
+                self.W, self.b = self.params_from_fused(self.W_fused, 2)
         else:
             self.W = self.add_param(W, self.get_W_shape(), name="W")
             if b is None:
                 self.b = None
+                self.W_fused = self.params_to_fused((self.W, ))
             else:
                 if self.untie_biases:
                     biases_shape = (num_filters,) + self.output_shape[2:]
@@ -321,24 +324,40 @@ class BaseConvLayer(Layer):
                     biases_shape = (num_filters,)
                 self.b = self.add_param(b, biases_shape, name="b",
                                         regularizable=False)
-            self.W_fused = BaseConvLayer.to_fused(self.W, self.b)
+                if self.untie_biases:
+                    self.W_fused = None
+                else:
+                    self.W_fused = self.params_to_fused((self.W, self.b))
 
-    @staticmethod
-    def from_fused(w_fused, w_shape, flip, bias):
-        w_shape = [w_shape[1], w_shape[2], w_shape[3], w_shape[0]]
-        if bias:
-            w = T.reshape(w_fused[:-1], w_shape).dimshuffle(3, 0, 1, 2)
-            b = w_fused[-1]
+
+    def params_to_fused(self, params):
+        if len(params) == 1:
+            w, b = params[0], None
         else:
-            w = T.reshape(w_fused, w_shape).dimshuffle(3, 0, 1, 2)
-            b = None
-        if flip:
+            w, b = params
+        if self.flip_filters:
             w = w[:, :, ::-1, ::-1]
-        return w, b
+        fused = T.reshape(w.dimshuffle(1, 2, 3, 0), (-1, w.shape[0]))
+        if b is not None:
+            if b.ndim > 1:
+                raise ValueError("Can not fuse with untie_biases=True")
+            fused = T.concatenate((fused, b.reshape((1, -1))), axis=0)
+        return fused
 
-    @staticmethod
-    def to_fused(w, b):
-        raise NotImplementedError
+    def params_from_fused(self, fused, num):
+        w_shape = self.get_W_shape()
+        w_shape = [w_shape[1], w_shape[2], w_shape[3], w_shape[0]]
+        if num == 2:
+            w = T.reshape(fused[:-1], w_shape).dimshuffle(3, 0, 1, 2)
+            b = fused[-1]
+            if self.flip_filters:
+                w = w[:, :, ::-1, ::-1]
+            return w, b
+        else:
+            w = T.reshape(fused, w_shape).dimshuffle(3, 0, 1, 2)
+            if self.flip_filters:
+                w = w[:, :, ::-1, ::-1]
+            return w,
 
     def image_to_mat(self, image):
         if self.pad not in ("same", "valid", "half"):
@@ -670,26 +689,19 @@ class Conv2DLayer(BaseConvLayer):
         assert len(curvature) == 1
         assert len(outputs) == 1
         if self.pad not in ("same", "valid", "half"):
-            raise ValueError("SKFGN supprots only pad='same', 'valid' and 'full'")
+            raise ValueError("SKFGN supports only pad='same', 'valid' and 'full'")
 
-        # Extract the activation of the layer
-        path = dfs_path(outputs[0], self.W)
-        index = None
-        for i in reversed(range(len(path))):
-            if path[i].owner is not None and isinstance(path[i].owner.op, T.nnet.abstract_conv.AbstractConv2d):
-                index = i
-                break
-        if index is None:
-            raise ValueError("Did not manage to find Dot?")
-        if self.b is not None:
-            index -= 1
-        activation = path[index]
+        # Extract the pre-activation of the layer
+        bias = self.b is not None
+        activation = fetch_pre_activation(outputs[0], inputs[0],
+                                          AbstractConv2d, bias)
         # Extract info and calculate Q
-        x = self.image_to_mat(inputs[0])
         curvature = curvature[0]
+        x = self.image_to_mat(inputs[0])
+        q_dim, g_dim = self.W_fused.shape.eval()
         n = th_fx(activation.shape[0])
-        q = T.dot(x.T, x) / n
         if optimizer.variant == "kfra":
+            q = T.dot(x.T, x) / n
             # Propagate curvature trough the nonlinearity and calculate the activation GN
             if self.nonlinearity != nonlinearities.identity:
                 a = T.Lop(outputs[0], activation, T.ones_like(outputs[0]))
@@ -697,11 +709,7 @@ class Conv2DLayer(BaseConvLayer):
                 g = curvature * T.dot(a.T, a) / n
             else:
                 g = curvature
-            if self.b is None or self.fused_bias:
-                # In this cases it is simple
-                kronecker_inversion(self, self.W_fused, q, g)
-            else:
-                kronecker_inversion(self, (self.W, self.b), q, g)
+            make_matrix(self, g_dim, q_dim, g, q, self.get_params())
             if self.invariant_axes != (2, 3):
                 raise ValueError("You are using KFRA on a conv layer however, "
                                  "this requires that you are invariant on axis 2 and 3 which you are"
@@ -713,13 +721,9 @@ class Conv2DLayer(BaseConvLayer):
             if self.nonlinearity != nonlinearities.identity:
                 curvature = T.Lop(outputs[0], activation, curvature)
             g_factor = curvature.dimshuffle(0, 2, 3, 1).reshape((-1, curvature.shape[1]))
-            g = T.dot(g_factor.T, g_factor) / n
-            if self.fused_bias:
-                # In this cases it is simple
-                kronecker_inversion(self, self.W_fused, q, g)
-            else:
-                raise NotImplementedError
-            return T.Lop(outputs[0], inputs[0], curvature),
+            make_matrix(self, g_dim, q_dim, g_factor, x, self.get_params(),
+                        n_a=n, n_b=n)
+            return T.Lop(activation, inputs[0], curvature),
 
 # TODO: add Conv3DLayer
 

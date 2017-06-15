@@ -64,7 +64,7 @@ def main(dataset="mnist", batch_size=1000, epochs=20, seed=413):
     print("Data-set:", dataset)
     print("Batch size:", batch_size)
     print("Epochs:", epochs)
-    set_fuse_bias(True)
+    # set_fuse_bias(True)
     if seed is not None:
         np.random.seed(seed)
     # Make model
@@ -82,12 +82,16 @@ def main(dataset="mnist", batch_size=1000, epochs=20, seed=413):
         binary = True
     else:
         raise ValueError("Unrecognized dataset:", dataset)
+    # set_fuse_bias(True)
+    # arch = (input_dim, 1000, 500, 250, 100, 50)
+    # in_vars, l_loss = autoencoder(arch, binary=binary)
     arch = (input_dim, 64, 64, 128, 128)
-    in_vars, l_loss = autoencoder(arch, binary=binary)
-    # in_vars, l_loss = convae(arch, binary=binary)
+    in_vars, l_loss = convae(arch, binary=binary)
     optim_args = {"variant": "skfgn-rp",
                   "curvature_avg": 0.9,
+                  "alpha_avg": 0.9,
                   "mirror_avg": 0.9,
+                  "avg_init_period": 50,
                   "random_sampler": "index"}
     optimizer = optimizer_from_dict(optim_args)
     updates, mirror_map, loss = optimizer(l_loss)

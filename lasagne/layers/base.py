@@ -368,14 +368,18 @@ class Layer(object):
             The activation square-roots of the activation Gauss-Newton matrices
             with respect to the outputs of the layer. 
         
-        kronecker_inversion: callable
-            A function which to calculate the inversion of the Kronecker products
-            times the gradient. The signature of the function is:
-            kronecker_inversion(owning_layer, w, q, g)
-                owning_layer - The layer which owns w
-                w - the parameter
-                q - current mini-batch estimate of Q
-                g - current mini-batch estimate of G
+        make_matrix: callable
+            A function which to construct and store the Kronecker-Factored
+            matrix kron(A,B) for the parameters in this layer.
+            the following signature:
+            make_matrix(layer, a_dim, b_dim, a, b, params, name)
+                layer - the owning layer of the parameters
+                a_dim - dimensionality of A
+                b_dim - dimensionality of A
+                a/a_sqrt - Factor or square root of the factor
+                b/b_sqrt - Factor or square root of the factor
+                params - the parameters corresponding to.
+                name - any extra name to add except the layer's.
 
         Returns
         -------
@@ -394,6 +398,12 @@ class Layer(object):
             raise NotImplementedError
         else:
             return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
+
+    def params_to_fused(self, params):
+        raise NotImplementedError
+
+    def params_from_fused(self, fused, num):
+        raise NotImplementedError
 
 
 class IndexLayer(Layer):
