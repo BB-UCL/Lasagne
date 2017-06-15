@@ -1,6 +1,7 @@
 import numpy as np
 import theano
 import theano.tensor as T
+from theano.ifelse import ifelse
 from theano.gradient import zero_grad
 from collections import OrderedDict
 
@@ -35,6 +36,8 @@ class Optimizer(object):
                  grad_avg=0.0,
                  curvature_avg=0.0,
                  mirror_avg=0.0,
+                 alpha_avg=0.0,
+                 alpha_period=1,
                  avg_init_period=100,
                  clipping=None,
                  learning_rate=1.0,
@@ -127,6 +130,9 @@ class Optimizer(object):
         self.curvature_avg = curvature_avg
         self._mirror_avg = None
         self.mirror_avg = mirror_avg
+        self._alpha_avg = None
+        self.alpha_avg = alpha_avg
+        self.alpha_period = alpha_period
 
         self.clipping = clipping
         self.learning_rate = learning_rate
@@ -186,6 +192,24 @@ class Optimizer(object):
         else:
             raise ValueError("Unrecognized type of curvature_avg:" + str(type(value)))
         self._curvature_avg = avg
+
+    @property
+    def alpha_avg(self):
+        return self._curvature_avg
+
+    @alpha_avg.setter
+    def alpha_avg(self, value):
+        if value is None or value == 0:
+            avg = None
+        elif isinstance(value, (int, float, np.ndarray, T.TensorVariable)):
+            def avg(s_t, x_t):
+                return upd.ema(value, s_t, x_t, self._t, self.avg_init_period)
+        elif callable(value):
+            def avg(s_t, x_t):
+                return value(s_t, x_t, self._t, self.avg_init_period)
+        else:
+            raise ValueError("Unrecognized type of curvature_avg:" + str(type(value)))
+        self._alpha_avg = avg
 
     @property
     def mirror_avg(self):
@@ -264,12 +288,27 @@ class Optimizer(object):
             if self.debug:
                 print("Applying GN momentum.")
             velocities = [make_velocity(p) for p in params]
-            steps = self.gn_rescale(gauss_newton_product, grads, initial_steps, velocities)
+            r, alpha_1, alpha_2 = self.gn_rescale(gauss_newton_product, grads, initial_steps, velocities)
+            add_to_report("skfgn_alpha", T.stack(alpha_1, alpha_2))
+            add_to_report("skfgn_reduction", r)
+            steps = [alpha_1 * step + alpha_2 * v for step, v in zip(initial_steps, velocities)]
         # If rescaling by the true Gauss-Newton
         elif self.rescale_by_gn:
             if self.debug:
                 print("Rescaling by the Gauss-Newton matrix.")
-            steps = self.gn_rescale(gauss_newton_product, grads, initial_steps)
+            r, alpha = self.gn_rescale(gauss_newton_product, grads, initial_steps)
+            # Alpha averaging only on certain iterations
+            if self.alpha_avg is not None:
+                cond1 = T.le(self._t, self.avg_init_period)
+                cond2 = T.mod(self._t, self.alpha_period)
+                cond = T.or_(cond1, cond2)
+                alpha_avg = theano.shared(utils.floatX(0.0001), name="skfgn_alpha_avg")
+                alpha = self.alpha_avg(alpha_avg, alpha)
+                r, alpha = ifelse(cond, (r, alpha), (0, alpha_avg))
+                extra_updates[alpha_avg] = alpha
+                add_to_report("skfgn_alpha", alpha)
+                add_to_report("skfgn_reduction", r)
+            steps = [step * alpha for step in initial_steps]
         # Else use your standard updates
         else:
             steps = initial_steps
@@ -476,11 +515,9 @@ class Optimizer(object):
             M = G + kI
             # M = theano_print_vals(M, "M")
             alpha = v / M
-            add_to_report("kf_alpha", alpha)
             # alpha = theano_print_vals(alpha, "alpha")
             reduction = alpha * v / 2.0
-            add_to_report("kf_reduction", reduction)
-            return [step * alpha for step in steps1]
+            return reduction, alpha
         else:
             steps2 = [zero_grad(step) for step in steps2]
             # In this case we have that $$D$$ has two columns vector and $$\alpha$$ is a 2D vector.
@@ -520,9 +557,7 @@ class Optimizer(object):
             # alpha_2 = theano_print_vals(alpha_2, "alpha_2")
 
             reduction = (alpha_1 * v_1 + alpha_2 * v_2) / 2.0
-            add_to_report("kf_alpha", T.stack((alpha_1, alpha_2)))
-            add_to_report("kf_reduction", reduction)
-            return [step_1 * alpha_1 + step_2 * alpha_2 for step_1, step_2 in zip(steps1, steps2)]
+            return reduction, alpha_1, alpha_2
 
 
 def optimizer_from_dict(primitive_dict):
@@ -674,9 +709,11 @@ class KroneckerFactoredMatrix(object):
                  b_dim,
                  params,
                  k=1e-3,
+                 name=None,
                  update_fn=None,
                  norm=utils.mean_trace_norm):
         self.layer = layer
+        self.name = "" if name is None else name
         self.a_dim = a_dim
         self.b_dim = b_dim
         self.params = params
@@ -693,7 +730,7 @@ class KroneckerFactoredMatrix(object):
         self.a_persistent = self.layer.add_param(
             utils.floatX(np.eye(self.a_dim) * self.k),
             (self.a_dim, self.a_dim),
-            name="KF_A",
+            name=self.name + "KF_A",
             broadcast_unit_dims=False,
             trainable=False,
             regularizable=False,
@@ -701,7 +738,7 @@ class KroneckerFactoredMatrix(object):
         self.b_persistent = self.layer.add_param(
             utils.floatX(np.eye(self.b_dim) * self.k),
             (self.b_dim, self.b_dim),
-            name="KF_B",
+            name=self.name + "KF_B",
             broadcast_unit_dims=False,
             trainable=False,
             regularizable=False,

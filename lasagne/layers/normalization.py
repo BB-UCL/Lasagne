@@ -150,7 +150,7 @@ class BatchNormLayer(Layer):
     ----------
     incoming : a :class:`Layer` instance or a tuple
         The layer feeding into this layer, or the expected input shape
-    axes : 'auto', int or tuple of int
+    axes : 'auto', 'per-activation', 'spatial', int or tuple of int
         The axis or axes to normalize over. If ``'auto'`` (the default),
         normalize over all axes except for the second: this will normalize over
         the minibatch dimension for dense layers, and additionally over all
@@ -230,12 +230,13 @@ class BatchNormLayer(Layer):
     """
     def __init__(self, incoming, axes='auto', epsilon=1e-4, alpha=0.1,
                  beta=init.Constant(0), gamma=init.Constant(1),
-                 mean=init.Constant(0), inv_std=init.Constant(1), **kwargs):
+                 mean=init.Constant(0), var=init.Constant(1), **kwargs):
         super(BatchNormLayer, self).__init__(incoming, **kwargs)
-
-        if axes == 'auto':
+        if axes in ('auto', 'spatial'):
             # default: normalize over all but the second axis
             axes = (0,) + tuple(range(2, len(self.input_shape)))
+        elif axes == 'per-activation':
+            axes = (0, )
         elif isinstance(axes, int):
             axes = (axes,)
         self.axes = axes
@@ -261,65 +262,51 @@ class BatchNormLayer(Layer):
                                         trainable=True, regularizable=True)
         self.mean = self.add_param(mean, shape, 'mean',
                                    trainable=False, regularizable=False)
-        self.inv_std = self.add_param(inv_std, shape, 'inv_std',
-                                      trainable=False, regularizable=False)
+        self.var = self.add_param(var, shape, 'var',
+                                  trainable=False, regularizable=False)
 
     def get_outputs_for(self, inputs, deterministic=False,
                         batch_norm_use_averages=None,
                         batch_norm_update_averages=None, **kwargs):
         x = inputs[0]
-        input_mean = x.mean(self.axes)
-        input_inv_std = T.inv(T.sqrt(x.var(self.axes) + self.epsilon))
 
         # Decide whether to use the stored averages or mini-batch statistics
         if batch_norm_use_averages is None:
             batch_norm_use_averages = deterministic
         use_averages = batch_norm_use_averages
 
-        if use_averages:
-            mean = self.mean
-            inv_std = self.inv_std
-        else:
-            mean = input_mean
-            inv_std = input_inv_std
-
         # Decide whether to update the stored averages
         if batch_norm_update_averages is None:
             batch_norm_update_averages = not deterministic
         update_averages = batch_norm_update_averages
 
-        if update_averages:
+        gamma = 1 if self.gamma is None else self.gamma
+        beta = 0 if self.beta is None else self.beta
+        if use_averages:
+            bn = T.nnet.bn.batch_normalization_test
+            out = bn(x, gamma, beta,
+                     self.mean, self.var,
+                     self.axes, self.epsilon)
+        elif update_averages:
+            bn = T.nnet.bn.batch_normalization_train
             # Trick: To update the stored statistics, we create memory-aliased
             # clones of the stored statistics:
-            running_mean = theano.clone(self.mean, share_inputs=False)
-            running_inv_std = theano.clone(self.inv_std, share_inputs=False)
+            out, _, _, new_mean, new_var = bn(x, gamma, beta, self.axes,
+                                              self.epsilon, self.alpha,
+                                              self.mean, self.var)
             # set a default update for them:
-            running_mean.default_update = ((1 - self.alpha) * running_mean +
-                                           self.alpha * input_mean)
-            running_inv_std.default_update = ((1 - self.alpha) *
-                                              running_inv_std +
-                                              self.alpha * input_inv_std)
+            self.mean.default_update = new_mean
+            self.var.default_update = new_var
             # and make sure they end up in the graph without participating in
             # the computation (this way their default_update will be collected
             # and applied, but the computation will be optimized away):
-            mean += 0 * running_mean
-            inv_std += 0 * running_inv_std
-
-        # prepare dimshuffle pattern inserting broadcastable axes as needed
-        param_axes = iter(range(x.ndim - len(self.axes)))
-        pattern = ['x' if input_axis in self.axes
-                   else next(param_axes)
-                   for input_axis in range(x.ndim)]
-
-        # apply dimshuffle pattern to all parameters
-        beta = 0 if self.beta is None else self.beta.dimshuffle(pattern)
-        gamma = 1 if self.gamma is None else self.gamma.dimshuffle(pattern)
-        mean = mean.dimshuffle(pattern)
-        inv_std = inv_std.dimshuffle(pattern)
-
-        # normalize
-        normalized = (x - mean) * (gamma * inv_std) + beta
-        return normalized,
+            out += 0 * self.mean
+            out += 0 * self.var
+        else:
+            bn = T.nnet.bn.batch_normalization_train
+            out, _, _, _, _ = bn(x, gamma, beta, self.axes,
+                                 self.epsilon, self.alpha)
+        return out,
 
 
 def batch_norm(layer, **kwargs):

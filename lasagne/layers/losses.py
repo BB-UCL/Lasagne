@@ -2,7 +2,7 @@ import theano.tensor as T
 
 from .. import utils
 from ..layers import Layer
-from ..random import normal, binary
+from ..random import normal, binary, multinomial
 
 __all__ = [
     "SKFGNLossLayer",
@@ -295,3 +295,81 @@ def bernoulli_logits_ll(output, target,
                                      x_repeats, y_repeats,
                                      *args, **kwargs)
     return SumLosses(layer, mode="merge", weights=[-1])
+
+
+class CategoricalLogitsCrossEntropy(SKFGNLossLayer):
+    """
+    Calculates the binary cross entropy between `output`(x) and `target`(y).
+    The `output`(x) are assumed to be the logits of the Bernoulli distribution.
+    Formally computes:
+        - y log(sigmoid(x)) - (1 - y) * log(sigmoid(-x))
+
+    Note that curvature is propagate only to `output`(x).
+
+    Parameters
+    ----------
+    output : a :class:`Layer` instance or a tuple or list
+        The layer or the expected input shape for `output`.
+
+    target : a :class:`Layer` instance or a tuple or list
+        The layer or the expected input shape for `target`.
+
+    x_repeats: int (default: 1)
+        If `output` has to be repeated some number of times.
+
+    y_repeats: int (default: 1)
+        If `target` has to be repeated some number of times.
+    """
+    def __init__(self, output, target, x_repeats=1, y_repeats=1, *args, **kwargs):
+        super(CategoricalLogitsCrossEntropy, self).__init__((output, target),
+                                                            (x_repeats, y_repeats),
+                                                            max_inputs=2, *args, **kwargs)
+
+    def get_outputs_for(self, inputs, **kwargs):
+        assert len(inputs) == 2
+        x, y = inputs
+        assert x.ndim == y.ndim
+        x = utils.expand_variable(x, self.repeats[0])
+        y = utils.expand_variable(y, self.repeats[1])
+        p_x = T.nnet.softmax(x)
+        # Calculate loss
+        cce = T.nnet.categorical_crossentropy(p_x, y)
+        # Flatten
+        cce = T.flatten(cce, outdim=2)
+        # Calculate per data point
+        cce = T.sum(cce, axis=1)
+        return cce,
+
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
+        x, y = inputs
+        assert len(curvature) == 1
+        weight = curvature[0]
+        p_x = T.nnet.softmax(x)
+        if optimizer.variant == "skfgn-rp":
+            v = optimizer.random_sampler(x.shape)
+            cl_v = T.sqrt(p_x * (1 - p_x)) * v
+            cl_v *= T.sqrt(weight)
+            return cl_v, None
+        elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
+            fake_dx = p_x - utils.th_fx(multinomial(x.shape, pvals=p_x))
+            fake_dx *= T.sqrt(weight)
+            return fake_dx, None
+        elif optimizer.variant == "kfra":
+            gn_x = T.diag(T.mean(p_x, axis=0)) - T.dot(p_x.T, p_x) / utils.th_fx(p_x.shape[0])
+            gn_x *= T.sqrt(weight)
+            return gn_x, None
+        else:
+            raise ValueError("Unreachable!")
+
+    def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
+        x, y = inputs_map[self]
+        h = T.nnet.softmax(x)
+
+        Jv1 = T.Rop(x, params, v1)
+        Jv2 = T.Rop(x, params, v2) if v2 else Jv1
+
+        # The Hessian is diag(h) - h h^T
+        # (diag(h) - h h^T) v = h * v - h h^T v = h * (v - h^T v) = h * v2
+        # v1^T H v2 = sum(v1 * h * v2)
+        v2 = Jv2 - T.sum(Jv2 * h, axis=1).dimshuffle(0, 'x')
+        return T.mean(T.sum(Jv1 * h * v2, axis=1))
