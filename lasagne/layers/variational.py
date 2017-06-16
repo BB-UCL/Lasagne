@@ -450,9 +450,11 @@ class GaussianLikelihood(SKFGNLossLayer):
                  *args, **kwargs):
         if p is None:
             incoming = (x, )
+            mn = 1
         else:
             incoming = (x, p)
-        super(GaussianLikelihood, self).__init__(incoming, *args, **kwargs)
+            mn = 2
+        super(GaussianLikelihood, self).__init__(incoming, max_inputs=mn, *args, **kwargs)
         self.num_samples = num_samples
         self.path_derivative = path_derivative
 

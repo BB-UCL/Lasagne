@@ -4,6 +4,7 @@ Non-linear activation functions for artificial neurons.
 """
 
 import theano.tensor
+from .utils import floatX
 
 
 # sigmoid
@@ -267,6 +268,12 @@ def elu(x):
        (ELUs), http://arxiv.org/abs/1511.07289
     """
     return theano.tensor.switch(x > 0, x, theano.tensor.exp(x) - 1)
+
+
+def selu(x):
+    alpha = floatX(1.6732632423543772848170429916717)
+    scale = floatX(1.0507009873554804934193349852946)
+    return scale * theano.tensor.switch(x > 0, x, alpha * (theano.tensor.exp(x) - 1))
 
 
 # leaky rectify

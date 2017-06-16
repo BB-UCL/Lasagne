@@ -200,7 +200,7 @@ def get_outputs(layer_or_layers, inputs=None, get_maps=False, **kwargs):
             all_outputs[layer] = layer.get_outputs_for(layer_inputs, **kwargs)
             try:
                 accepted_kwargs |= set(utils.inspect_kwargs(
-                        layer.get_outputs_for))
+                    layer.get_outputs_for))
             except TypeError:
                 # If introspection is not possible, skip it
                 pass
@@ -235,18 +235,23 @@ def get_output(layer_or_layers, inputs=None, get_maps=False, **kwargs):
                                                      inputs=inputs,
                                                      get_maps=get_maps,
                                                      **kwargs)
-        if len(outputs) == 1:
-            return outputs[0], input_map, output_map
-        else:
-            raise ValueError("The layer has more than 1 output, "
-                             "use `get_outputs`.")
     else:
         outputs = get_outputs(layer_or_layers, inputs=inputs, **kwargs)
-        if len(outputs) == 1:
-            return outputs[0]
-        else:
-            raise ValueError("The layer has more than 1 output, "
-                             "use `get_outputs`.")
+    if isinstance(layer_or_layers, (list, tuple)):
+        for out in outputs:
+            if len(out) > 1:
+                raise ValueError("The layer has more than 1 output, "
+                                 "use `get_outputs`.")
+        outputs = tuple(out[0] for out in outputs)
+    elif len(outputs) == 1:
+        outputs = outputs[0]
+    else:
+        raise ValueError("The layer has more than 1 output, "
+                         "use `get_outputs`.")
+    if get_maps:
+        return outputs, input_map, output_map
+    else:
+        return outputs
 
 
 def get_output_shapes(layer_or_layers, input_shapes=None):
@@ -409,7 +414,7 @@ def get_all_params(layer, unwrap_shared=True, **tags):
     """
     layers = get_all_layers(layer)
     params = chain.from_iterable(l.get_params(
-            unwrap_shared=unwrap_shared, **tags) for l in layers)
+        unwrap_shared=unwrap_shared, **tags) for l in layers)
     return utils.unique(params)
 
 

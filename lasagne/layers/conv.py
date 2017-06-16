@@ -329,7 +329,6 @@ class BaseConvLayer(Layer):
                 else:
                     self.W_fused = self.params_to_fused((self.W, self.b))
 
-
     def params_to_fused(self, params):
         if len(params) == 1:
             w, b = params[0], None
@@ -917,6 +916,10 @@ class TransposedConv2DLayer(BaseConvLayer):
             output_size = self.get_output_shape_for(x.shape)[2:]
         conved = op(self.W, x, output_size)
         return conved
+
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
+        # TODO
+        pass
 
 Deconv2DLayer = TransposedConv2DLayer
 

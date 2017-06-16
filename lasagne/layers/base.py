@@ -400,10 +400,36 @@ class Layer(object):
             return T.Lop(outputs, inputs, curvature, disconnected_inputs="warn")
 
     def params_to_fused(self, params):
-        raise NotImplementedError
+        """
+        Converts a list of expression of the same shapes as the parameters of
+        the layer to a fused version.
+        This is used for SKFGN for when passing gradients, but having a single
+
+        Parameters
+        ----------
+        params: list or tuple
+            List of expressions to fuse.
+
+        Returns
+        -------
+        An expression of all of the inputs fused together.
+        """
+        return None
 
     def params_from_fused(self, fused, num):
-        raise NotImplementedError
+        """
+        Reverses the effect of :params_to_fused:
+
+        Parameters
+        ----------
+        fused: Theano expression
+            Expression of fused variables.
+
+        Returns
+        -------
+        The un-fused expression.
+        """
+        return None
 
 
 class IndexLayer(Layer):
