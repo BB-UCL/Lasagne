@@ -699,7 +699,7 @@ class KroneckerFactoredMatrix(object):
                  update_fn=None,
                  norm=utils.mean_trace_norm):
         self.layer = layer
-        self.name = "" if name is None else name
+        self.name = "" if name is None else name + "_"
         self.a_dim = a_dim
         self.b_dim = b_dim
         self.params = params
@@ -713,17 +713,27 @@ class KroneckerFactoredMatrix(object):
             self.b_persistent = None
 
     def make_persistent(self):
+        if self.a_dim == 1:
+            value = self.k
+            shape = ()
+        else:
+            value = np.eye(self.a_dim) * self.k
+            shape = (self.a_dim, self.a_dim)
         self.a_persistent = self.layer.add_param(
-            utils.floatX(np.eye(self.a_dim) * self.k),
-            (self.a_dim, self.a_dim),
+            utils.floatX(value), shape,
             name=self.name + "KF_A",
             broadcast_unit_dims=False,
             trainable=False,
             regularizable=False,
             kf=True)
+        if self.b_dim == 1:
+            value = self.k
+            shape = ()
+        else:
+            value = np.eye(self.b_dim) * self.k
+            shape = (self.b_dim, self.b_dim)
         self.b_persistent = self.layer.add_param(
-            utils.floatX(np.eye(self.b_dim) * self.k),
-            (self.b_dim, self.b_dim),
+            utils.floatX(value), shape,
             name=self.name + "KF_B",
             broadcast_unit_dims=False,
             trainable=False,
@@ -754,19 +764,34 @@ class KroneckerFactoredMatrix(object):
     def linear_solve(self, v, use="updates", right_multiply=True):
         assert v.ndim == 2
         a, b = self.a(use), self.b(use)
-        omega = T.sqrt(self.norm(a) / self.norm(b))
-        add_to_report(self.layer.name + "_omega", omega)
-        a /= omega
-        b *= omega
-        a += T.eye(a.shape[0]) * T.sqrt(self.k)
-        b += T.eye(b.shape[0]) * T.sqrt(self.k)
-        if right_multiply:
-            v1 = utils.linear_solve(b, v, "symmetric")
-            v2 = utils.linear_solve(a, v1.T, "symmetric").T
+        if self.a_dim == 1 and self.b_dim == 1:
+            return v / (a * b + self.k)
+        elif self.a_dim == 1:
+            b += T.eye(self.b_dim) * self.k
+            if right_multiply:
+                return utils.linear_solve(b, v, "symmetric") / a
+            else:
+                return utils.linear_solve(b, v.T, "symmetric").T / a
+        elif self.b_dim == 1:
+            a += T.eye(self.a_dim) * self.k
+            if right_multiply:
+                return utils.linear_solve(a, v.T, "symmetric").T / a
+            else:
+                return utils.linear_solve(a, v, "symmetric") / b
         else:
-            v1 = utils.linear_solve(a, v, "symmetric")
-            v2 = utils.linear_solve(b, v1.T, "symmetric").T
-        return v2
+            omega = T.sqrt(self.norm(a) / self.norm(b))
+            add_to_report(self.layer.name + "_omega", omega)
+            a /= omega
+            b *= omega
+            a += T.eye(self.a_dim) * T.sqrt(self.k)
+            b += T.eye(self.b_dim) * T.sqrt(self.k)
+            if right_multiply:
+                v1 = utils.linear_solve(b, v, "symmetric")
+                v2 = utils.linear_solve(a, v1.T, "symmetric").T
+            else:
+                v1 = utils.linear_solve(a, v, "symmetric")
+                v2 = utils.linear_solve(b, v1.T, "symmetric").T
+            return v2
 
     def cholesky_product(self, v, use="updates", right_multiply=True):
         assert v.ndim == 2
@@ -840,9 +865,19 @@ class SqrtMatrix(KroneckerFactoredMatrix):
         super(SqrtMatrix, self).__init__(layer, a_dim, b_dim, params,
                                          *args, **kwargs)
         self.a_sqrt = a_sqrt
-        self.n_a = a_sqrt.shape[0] if n_a is None else n_a
+        if a_sqrt.ndim == 0:
+            self.n_a = 1
+        elif n_a is None:
+            self.n_a = a_sqrt.shape[0]
+        else:
+            self.n_a = n_a
         self.b_sqrt = b_sqrt
-        self.n_b = b_sqrt.shape[0] if n_b is None else n_b
+        if b_sqrt.ndim == 0:
+            self.n_b = 1
+        elif n_b is None:
+            self.n_b = b_sqrt.shape[0]
+        else:
+            self.n_b = n_b
         if self.update_fn is not None:
             a_upd = self.update_fn(self.a_persistent, self.a("raw"))
             b_upd = self.update_fn(self.b_persistent, self.b("raw"))
@@ -852,12 +887,15 @@ class SqrtMatrix(KroneckerFactoredMatrix):
         if use == "persistent":
             return self.a_persistent
         elif use == "raw":
-            return T.dot(self.a_sqrt.T, self.a_sqrt) / utils.th_fx(self.n_a)
+            if self.a_sqrt.ndim == 0:
+                return T.sqr(self.a_sqrt)
+            else:
+                return T.dot(self.a_sqrt.T, self.a_sqrt) / utils.th_fx(self.n_a)
         elif use == "updates":
             if self.updates is not None:
                 return self.updates[0]
             else:
-                return T.dot(self.a_sqrt.T, self.a_sqrt) / utils.th_fx(self.n_a)
+                return self.a(use="raw")
         else:
             raise ValueError("Unrecognized use=" + use)
 
@@ -865,12 +903,15 @@ class SqrtMatrix(KroneckerFactoredMatrix):
         if use == "persistent":
             return self.b_persistent
         elif use == "raw":
-            return T.dot(self.b_sqrt.T, self.b_sqrt) / utils.th_fx(self.n_b)
+            if self.b_sqrt.ndim == 0:
+                return T.sqr(self.b_sqrt)
+            else:
+                return T.dot(self.b_sqrt.T, self.b_sqrt) / utils.th_fx(self.n_b)
         elif use == "updates":
             if self.updates is not None:
                 return self.updates[1]
             else:
-                return T.dot(self.b_sqrt.T, self.b_sqrt) / utils.th_fx(self.n_b)
+                return self.b(use="raw")
         else:
             raise ValueError("Unrecognized use=" + use)
 

@@ -16,6 +16,7 @@ def autoencoder(arch, binary=True, nonl=tanh):
     for i in range(1, len(arch)):
         layer = L.DenseLayer(layer, arch[i], nonlinearity=nonl,
                              name="encode_" + str(i))
+        layer = L.batch_norm(layer)
         # layer = L.NonlinearityLayer(layer, nonl, name="encode_" + str(i) + "_a")
     # Decoder
     for i in reversed(range(1, len(arch) - 1)):
@@ -83,10 +84,10 @@ def main(dataset="mnist", batch_size=1000, epochs=20, seed=413):
     else:
         raise ValueError("Unrecognized dataset:", dataset)
     # set_fuse_bias(True)
-    # arch = (input_dim, 1000, 500, 250, 100, 50)
-    # in_vars, l_loss = autoencoder(arch, binary=binary)
-    arch = (input_dim, 64, 64, 128, 128)
-    in_vars, l_loss = convae(arch, binary=binary)
+    arch = (input_dim, 1000, 500, 250, 100, 50)
+    in_vars, l_loss = autoencoder(arch, binary=binary)
+    # arch = (input_dim, 64, 64, 128, 128)
+    # in_vars, l_loss = convae(arch, binary=binary)
     optim_args = {"variant": "skfgn-rp",
                   "curvature_avg": 0.9,
                   "alpha_avg": 0.9,

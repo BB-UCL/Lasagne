@@ -963,10 +963,12 @@ def set_parameters(params, value_mapping, verbose=True):
 
 
 def Rop(f, wrt, v):
-    return T.Rop(f, wrt, v)
-    # if isinstance(f, (list, tuple)):
-    #     u = [T.zeros_like(i) for i in f]
-    #     return T.Lop(T.Lop(f, wrt, u), u, v)
-    # else:
-    #     u = T.zeros_like(f)
-    #     return T.Lop(T.Lop(f, wrt, u), u, v)
+    try:
+        return T.Rop(f, wrt, v)
+    except:
+        if isinstance(f, (list, tuple)):
+            u = [T.zeros_like(i) for i in f]
+            return T.Lop(T.Lop(f, wrt, u), u, v)
+        else:
+            u = T.zeros_like(f)
+            return T.Lop(T.Lop(f, wrt, u), u, v)

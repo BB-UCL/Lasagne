@@ -113,7 +113,7 @@ class DenseLayer(Layer):
             self.W = self.add_param(W, (num_inputs, num_units), name="W",
                                     broadcast_unit_dims=False)
             self.b = None
-            self.W_fused = self.params_to_fused((self.W, ))
+            self.W_fused = None
         elif self.fuse_bias:
             self.W_fused = self.add_param(W, (num_inputs + 1, num_units), name="W_fused",
                                           broadcast_unit_dims=False)
@@ -127,7 +127,7 @@ class DenseLayer(Layer):
                                     broadcast_unit_dims=False)
             self.b = self.add_param(b, (num_units,), name="b",
                                     regularizable=False)
-            self.W_fused = self.params_to_fused((self.W, self.b))
+            self.W_fused = None
 
     def get_output_shapes_for(self, input_shapes):
         input_shape = input_shapes[0]
@@ -177,8 +177,10 @@ class DenseLayer(Layer):
         # Extract info and calculate Q
         x = self.transform_x(inputs[0])
         curvature = curvature[0]
-        x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
-        q_dim, g_dim = self.W_fused.shape.eval()
+        q_dim, g_dim = self.W.shape.eval()
+        if self.b is not None:
+            x = T.concatenate((x, T.ones((x.shape[0], 1))), axis=1)
+            q_dim += 1
         if optimizer.variant == "kfra":
             n = th_fx(x.shape[0])
             q = T.dot(x.T, x) / n
