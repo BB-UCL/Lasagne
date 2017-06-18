@@ -16,7 +16,7 @@ def autoencoder(arch, binary=True, nonl=tanh):
     for i in range(1, len(arch)):
         layer = L.DenseLayer(layer, arch[i], nonlinearity=nonl,
                              name="encode_" + str(i))
-        layer = L.batch_norm(layer)
+        layer = L.batch_norm(layer, use_theano=True)
         # layer = L.NonlinearityLayer(layer, nonl, name="encode_" + str(i) + "_a")
     # Decoder
     for i in reversed(range(1, len(arch) - 1)):
