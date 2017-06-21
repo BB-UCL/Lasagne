@@ -298,3 +298,28 @@ def uniform_ball(shape, radius=None, dtype=None, random=None):
     distance = radius * u ** (1 / dim)
     norm = T.sqrt(T.sum(T.sqr(x), axis=-1, keepdims=True))
     return distance / norm * x
+
+@multi_sampler
+def matrix_normal(shape, M=None, A=None, B=None, dtype=None):
+    dtype = dtype or theano.config.floatX
+    if len(shape) == 2:
+        n, p = shape
+    else:
+        n, p = shape[1:]
+    if M is None:
+        M = T.zeros((n, p), dtype=dtype)
+    if A is None:
+        A = T.eye(n)
+    if B is None:
+        B = T.eye(p)
+
+    X = normal(shape, dtype=dtype)
+    if M is None and A is None and B is None:
+        return X
+
+    if len(shape) == 2:
+        return M + A.dot(X).dot(B)
+    else:
+        M = M.dimshuffle(['x', 0, 1])
+        return M + (X.dimshuffle([0, 2, 1]).dot(A.T)).dimshuffle([0, 2, 1]).dot(B)
+
