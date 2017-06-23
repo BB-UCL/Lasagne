@@ -599,8 +599,12 @@ def theano_print_shape(var, msg):
     A Theano expression which should be used instead of the original expression
     in order the printing to happen.
     """
-    pr = Print(msg)(T.shape(var))
-    return T.switch(T.lt(0, 1), var, T.cast(pr[0], var.dtype))
+    if var.ndim == 0:
+        pr = Print(msg + "(SCALAR)")(var)
+        return T.switch(T.lt(0, 1), var, pr)
+    else:
+        pr = Print(msg)(T.shape(var))
+        return T.switch(T.lt(0, 1), var, T.cast(pr[0], var.dtype))
 
 
 def theano_print_min_max(var, msg):
@@ -759,9 +763,12 @@ def gauss_newton_product(outputs, outputs_hess, params, v1, v2=None):
     The expected value of the product with the Generalized Gauss-Newton matrix.
     """
     assert outputs_hess.ndim == 2 or outputs_hess.ndim == 0
-    Jv1 = Rop(outputs, params, v1)
-    Jv2 = Rop(outputs, params, v2) if v2 else Jv1
-    return T.mean(T.sum(Jv1 * Jv2 * outputs_hess, axis=1))
+    try:
+        Jv1 = Rop(outputs, params, v1)
+        Jv2 = Rop(outputs, params, v2) if v2 else Jv1
+        return T.mean(T.sum(Jv1 * Jv2 * outputs_hess, axis=1))
+    except KeyError:
+        return T.constant(0)
 
 
 def linear_solve(A, b, A_structure="general"):
@@ -914,7 +921,7 @@ def fetch_pre_activation(f, x, op, bias=False):
     A theano expression for the pre-activation Wx + b
     """
     path = dfs_path(f, x)
-    for i in reversed(range(len(path))):
+    for i in range(len(path)):
         if path[i].owner is not None and isinstance(path[i].owner.op, op):
             if bias:
                 return path[i - 1]
@@ -963,12 +970,12 @@ def set_parameters(params, value_mapping, verbose=True):
 
 
 def Rop(f, wrt, v):
-    try:
-        return T.Rop(f, wrt, v)
-    except:
-        if isinstance(f, (list, tuple)):
-            u = [T.zeros_like(i) for i in f]
-            return T.Lop(T.Lop(f, wrt, u), u, v)
-        else:
-            u = T.zeros_like(f)
-            return T.Lop(T.Lop(f, wrt, u), u, v)
+    # try:
+    return T.Rop(f, wrt, v)
+    # except:
+    #     if isinstance(f, (list, tuple)):
+    #         u = [T.zeros_like(i) for i in f]
+    #         return T.Lop(T.Lop(f, wrt, u), u, v)
+    #     else:
+    #         u = T.zeros_like(f)
+    #         return T.Lop(T.Lop(f, wrt, u), u, v)

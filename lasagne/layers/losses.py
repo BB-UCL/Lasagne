@@ -7,9 +7,11 @@ from ..random import normal, binary, multinomial
 __all__ = [
     "SKFGNLossLayer",
     "SumLosses",
-    "SquaredLoss",
+    "SquaredError",
     "BinaryLogitsCrossEntropy",
-    "bernoulli_logits_ll"
+    "bernoulli_logits_ll",
+    "CategoricalLogitsCrossEntropy",
+    "categorical_logits_ll"
 ]
 
 
@@ -118,7 +120,8 @@ class SumLosses(SKFGNLossLayer):
     def get_outputs_for(self, inputs, **kwargs):
         assert len(inputs) == len(self.weights)
         if self.mode == "merge":
-            return sum(i * w for i, w in zip(inputs, self.weights)),
+            return sum(utils.expand_variable(i, r) * w for i, w, r in
+                       zip(inputs, self.weights, self.repeats)),
         elif self.mode == "mean":
             return sum(T.mean(i) * w for i, w in zip(inputs, self.weights)),
         else:
@@ -132,7 +135,8 @@ class SumLosses(SKFGNLossLayer):
             return (),
 
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
-        return self.weights
+        # NB!! The curvature matrix should always be PSD hence we propagate absolute values.
+        return [T.abs_(T.constant(w)) for w in self.weights]
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
         for l in self.input_layers:
@@ -142,7 +146,7 @@ class SumLosses(SKFGNLossLayer):
                    for l_in, w in zip(self.input_layers, self.skfgn_weights))
 
 
-class SquaredLoss(SKFGNLossLayer):
+class SquaredError(SKFGNLossLayer):
     """
     A squared loss layer calculating:
         0.5 (x - y)^T (x - y)
@@ -165,9 +169,9 @@ class SquaredLoss(SKFGNLossLayer):
     """
 
     def __init__(self, x, y, x_repeats=1, y_repeats=1, *args, **kwargs):
-        super(SquaredLoss, self).__init__((x, y),
-                                          (x_repeats, y_repeats),
-                                          max_inputs=2, *args, **kwargs)
+        super(SquaredError, self).__init__((x, y),
+                                           (x_repeats, y_repeats),
+                                           max_inputs=2, *args, **kwargs)
         assert len(self.input_shapes) == 2
 
     def get_outputs_for(self, inputs, **kwargs):
@@ -264,11 +268,11 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
         if optimizer.variant == "skfgn-rp":
             v = optimizer.random_sampler(x.shape)
             cl_v = T.sqrt(p_x * (1 - p_x)) * v
-            cl_v *= T.sqrt(weight)
+            cl_v = utils.collapse_variable(cl_v, self.repeats[0]) * T.sqrt(weight)
             return cl_v, None
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
             fake_dx = p_x - utils.th_fx(binary(x.shape, p=p_x))
-            fake_dx *= T.sqrt(weight)
+            fake_dx = utils.collapse_variable(fake_dx, self.repeats[0]) * T.sqrt(weight)
             return fake_dx, None
         elif optimizer.variant == "kfra":
             if x.ndim == 1:
@@ -373,3 +377,12 @@ class CategoricalLogitsCrossEntropy(SKFGNLossLayer):
         # v1^T H v2 = sum(v1 * h * v2)
         v2 = Jv2 - T.sum(Jv2 * h, axis=1).dimshuffle(0, 'x')
         return T.mean(T.sum(Jv1 * h * v2, axis=1))
+
+
+def categorical_logits_ll(output, target,
+                          x_repeats=1, y_repeats=1,
+                          *args, **kwargs):
+    layer = CategoricalLogitsCrossEntropy(output, target,
+                                          x_repeats, y_repeats,
+                                          *args, **kwargs)
+    return SumLosses(layer, mode="merge", weights=[-1])

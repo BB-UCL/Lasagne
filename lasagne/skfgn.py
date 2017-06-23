@@ -4,6 +4,7 @@ import theano.tensor as T
 from theano.ifelse import ifelse
 from theano.gradient import zero_grad
 from collections import OrderedDict
+import warnings
 
 from . import random
 from . import utils
@@ -266,7 +267,7 @@ class Optimizer(object):
         grads_map = OrderedDict((p, g) for p, g in zip(params, grads))
 
         # Calculate all of the Kronecker-Factored matrices
-        kf_matrices = self.curvature_propagation(loss_layer, 1,
+        kf_matrices = self.curvature_propagation(loss_layer, T.constant(1),
                                                  inputs_map, outputs_map,
                                                  treat_as_input)
 
@@ -297,6 +298,7 @@ class Optimizer(object):
             if self.debug:
                 print("Rescaling by the Gauss-Newton matrix.")
             r, alpha = self.gn_rescale(gauss_newton_product, grads, initial_steps)
+            # alpha = T.abs_(alpha)
             # Alpha averaging only on certain iterations
             if self.alpha_avg is not None:
                 cond1 = T.le(self._t, self.avg_init_period)
@@ -306,8 +308,8 @@ class Optimizer(object):
                 alpha = self.alpha_avg(alpha_avg, alpha)
                 r, alpha = ifelse(cond, (r, alpha), (utils.th_fx(0), alpha_avg))
                 extra_updates[alpha_avg] = alpha
-                add_to_report("skfgn_alpha", alpha)
-                add_to_report("skfgn_reduction", r)
+            add_to_report("skfgn_alpha", alpha)
+            add_to_report("skfgn_reduction", r)
             steps = [step * alpha for step in initial_steps]
         # Else use your standard updates
         else:
@@ -419,7 +421,7 @@ class Optimizer(object):
                               inputs_map=None, outputs_map=None,
                               treat_as_input=None):
         if loss_grad is None:
-            loss_grad = 1
+            loss_grad = T.constant(1)
         if inputs_map is None or outputs_map is None:
             _, inputs_map, outputs_map = get_output(loss_layer, get_maps=True)
         # List of all the Kronecker-Factored matrices
@@ -471,10 +473,18 @@ class Optimizer(object):
             c = 0
             for i, l in enumerate(layer.input_layers):
                 current_curvature = curvature[c: c + l.num_outputs]
-                if curvature_map.get(l) is not None:
-                    curvature_map[l] = [old + new for old, new in zip(curvature_map[l], current_curvature)]
+                if None in current_curvature and len(current_curvature) > 1:
+                    raise NotImplementedError
+                if current_curvature[0] is not None:
+                    if curvature_map.get(l) is not None:
+                        curvature_map[l] = [old + new for old, new in zip(curvature_map[l], current_curvature)]
+                    else:
+                        curvature_map[l] = current_curvature
+                    c += l.num_outputs
                 else:
-                    curvature_map[l] = current_curvature
+                    if not isinstance(l, InputLayer):
+                        warnings.warn("Layer {}({}) has incoming curvature None."
+                                      .format(l.name, type(l).__name__))
 
         return kf_matrices
 
@@ -713,27 +723,23 @@ class KroneckerFactoredMatrix(object):
             self.b_persistent = None
 
     def make_persistent(self):
-        if self.a_dim == 1:
-            value = self.k
-            shape = ()
-        else:
+        try:
+            value = self.a("raw").eval()
+        except :
             value = np.eye(self.a_dim) * self.k
-            shape = (self.a_dim, self.a_dim)
         self.a_persistent = self.layer.add_param(
-            utils.floatX(value), shape,
+            utils.floatX(value), (self.a_dim, self.a_dim),
             name=self.name + "KF_A",
             broadcast_unit_dims=False,
             trainable=False,
             regularizable=False,
             kf=True)
-        if self.b_dim == 1:
-            value = self.k
-            shape = ()
-        else:
+        try:
+            value = self.b("raw").eval()
+        except :
             value = np.eye(self.b_dim) * self.k
-            shape = (self.b_dim, self.b_dim)
         self.b_persistent = self.layer.add_param(
-            utils.floatX(value), shape,
+            utils.floatX(value), (self.b_dim, self.b_dim),
             name=self.name + "KF_B",
             broadcast_unit_dims=False,
             trainable=False,
@@ -769,15 +775,15 @@ class KroneckerFactoredMatrix(object):
         elif self.a_dim == 1:
             b += T.eye(self.b_dim) * self.k
             if right_multiply:
-                return utils.linear_solve(b, v, "symmetric") / a
+                return utils.linear_solve(b, v, "symmetric") / a[0, 0]
             else:
-                return utils.linear_solve(b, v.T, "symmetric").T / a
+                return utils.linear_solve(b, v.T, "symmetric").T / a[0, 0]
         elif self.b_dim == 1:
             a += T.eye(self.a_dim) * self.k
             if right_multiply:
-                return utils.linear_solve(a, v.T, "symmetric").T / a
+                return utils.linear_solve(a, v.T, "symmetric").T / b[0, 0]
             else:
-                return utils.linear_solve(a, v, "symmetric") / b
+                return utils.linear_solve(a, v, "symmetric") / b[0, 0]
         else:
             omega = T.sqrt(self.norm(a) / self.norm(b))
             add_to_report(self.layer.name + "_omega", omega)
@@ -814,14 +820,16 @@ class StandardMatrix(KroneckerFactoredMatrix):
                  params,
                  *args,
                  **kwargs):
-        super(StandardMatrix, self).__init__(layer, a_dim, b_dim, params,
-                                             *args, **kwargs)
         self.a_raw = a_raw
         self.b_raw = b_raw
+        super(StandardMatrix, self).__init__(layer, a_dim, b_dim, params,
+                                             *args, **kwargs)
         if self.update_fn is not None:
-            a_upd = self.update_fn(self.a_persistent, self.a("raw"))
-            b_upd = self.update_fn(self.b_persistent, self.b("raw"))
+            a_upd = self.update_fn(self.a_persistent, self.a_raw)
+            b_upd = self.update_fn(self.b_persistent, self.b_raw)
             self.updates = [a_upd, b_upd]
+        else:
+            self.updates = None
 
     def a(self, use):
         if use == "persistent":
@@ -862,35 +870,24 @@ class SqrtMatrix(KroneckerFactoredMatrix):
                  n_b=None,
                  *args,
                  **kwargs):
+        self.a_sqrt = a_sqrt
+        self.n_a = a_sqrt.shape[0] if n_a is None else n_a
+        self.b_sqrt = b_sqrt
+        self.n_b = b_sqrt.shape[0] if n_b is None else n_b
         super(SqrtMatrix, self).__init__(layer, a_dim, b_dim, params,
                                          *args, **kwargs)
-        self.a_sqrt = a_sqrt
-        if a_sqrt.ndim == 0:
-            self.n_a = 1
-        elif n_a is None:
-            self.n_a = a_sqrt.shape[0]
-        else:
-            self.n_a = n_a
-        self.b_sqrt = b_sqrt
-        if b_sqrt.ndim == 0:
-            self.n_b = 1
-        elif n_b is None:
-            self.n_b = b_sqrt.shape[0]
-        else:
-            self.n_b = n_b
         if self.update_fn is not None:
             a_upd = self.update_fn(self.a_persistent, self.a("raw"))
             b_upd = self.update_fn(self.b_persistent, self.b("raw"))
             self.updates = [a_upd, b_upd]
+        else:
+            self.updates = None
 
     def a(self, use):
         if use == "persistent":
             return self.a_persistent
         elif use == "raw":
-            if self.a_sqrt.ndim == 0:
-                return T.sqr(self.a_sqrt)
-            else:
-                return T.dot(self.a_sqrt.T, self.a_sqrt) / utils.th_fx(self.n_a)
+            return T.dot(self.a_sqrt.T, self.a_sqrt) / utils.th_fx(self.n_a)
         elif use == "updates":
             if self.updates is not None:
                 return self.updates[0]
@@ -903,10 +900,7 @@ class SqrtMatrix(KroneckerFactoredMatrix):
         if use == "persistent":
             return self.b_persistent
         elif use == "raw":
-            if self.b_sqrt.ndim == 0:
-                return T.sqr(self.b_sqrt)
-            else:
-                return T.dot(self.b_sqrt.T, self.b_sqrt) / utils.th_fx(self.n_b)
+            return T.dot(self.b_sqrt.T, self.b_sqrt) / utils.th_fx(self.n_b)
         elif use == "updates":
             if self.updates is not None:
                 return self.updates[1]

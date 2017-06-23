@@ -355,7 +355,7 @@ class BatchNormLayer(Layer):
             d1 = T.prod([shape[i] for i in self.axes])
             d2 = np.prod(self.mean.get_value().shape)
             g_dim = 1
-            g = T.constant(1.0)
+            g = T.constant(1.0).reshape((1, 1))
             q_dim = d2
             if self.beta is not None:
                 q = curvature.dimshuffle(*shuffle).reshape((d1, d2))
@@ -372,11 +372,25 @@ class BatchNormLayer(Layer):
                         raise ValueError("Did not find dimshuffle")
                 else:
                     centered_times_gamma = outputs
-                param_axes = iter(range(inputs[0].ndim - len(self.axes)))
-                pattern = ['x' if input_axis in self.axes
-                           else next(param_axes)
-                           for input_axis in range(inputs[0].ndim)]
-                normalized = centered_times_gamma / self.gamma.dimshuffle(pattern)
+                op = centered_times_gamma.owner.inputs[0].owner.op
+                if isinstance(op, theano.tensor.elemwise.Elemwise):
+                    if isinstance(op.scalar_op, theano.scalar.basic.Sub):
+                        centered = centered_times_gamma.owner.inputs[0]
+                        factor = centered_times_gamma.owner.inputs[1]
+                    else:
+                        centered = centered_times_gamma.owner.inputs[1]
+                        factor = centered_times_gamma.owner.inputs[0]
+                else:
+                    raise ValueError("First child of centered_times_gamma is not Elemwise")
+                assert isinstance(factor.owner.op, theano.tensor.elemwise.Elemwise)
+                assert isinstance(factor.owner.op.scalar_op, theano.scalar.basic.Mul)
+                if factor.owner.inputs[0] == self.gamma:
+                    inv_std = factor.owner.inputs[1]
+                elif factor.owner.inputs[0].owner.inputs[0] == self.gamma:
+                    inv_std = factor.owner.inputs[1]
+                else:
+                    inv_std = factor.owner.inputs[0]
+                normalized = centered * inv_std
                 q1 = curvature.dimshuffle(*shuffle).reshape((d1, d2))
                 q2 = normalized.dimshuffle(*shuffle).reshape((d1, d2))
                 q = q1 * q2
@@ -611,7 +625,7 @@ class BatchNormTheanoLayer(Layer):
             d1 = T.prod([shape[i] for i in self.axes])
             d2 = np.prod(self.mean.get_value().shape)
             g_dim = 1
-            g = T.constant(1.0)
+            g = T.constant(1.0).reshape((1, 1))
             q_dim = d2
             if self.beta is not None:
                 q = curvature.dimshuffle(*shuffle).reshape((d1, d2))

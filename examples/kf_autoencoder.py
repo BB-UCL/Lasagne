@@ -16,7 +16,7 @@ def autoencoder(arch, binary=True, nonl=tanh):
     for i in range(1, len(arch)):
         layer = L.DenseLayer(layer, arch[i], nonlinearity=nonl,
                              name="encode_" + str(i))
-        layer = L.batch_norm(layer, use_theano=True)
+        layer = L.batch_norm(layer, use_theano=False)
         # layer = L.NonlinearityLayer(layer, nonl, name="encode_" + str(i) + "_a")
     # Decoder
     for i in reversed(range(1, len(arch) - 1)):
@@ -29,8 +29,8 @@ def autoencoder(arch, binary=True, nonl=tanh):
         l_loss = L.BinaryLogitsCrossEntropy(layer, l_in,
                                             name="crossentropy")
     else:
-        l_loss = L.SquaredLoss(layer, l_in,
-                               name="squareloss")
+        l_loss = L.SquaredError(layer, l_in,
+                                name="squareloss")
     return [l_in.input_var], l_loss
 
 
@@ -56,8 +56,8 @@ def convae(arch, binary=True, nonl=tanh):
         l_loss = L.BinaryLogitsCrossEntropy(layer, l_in,
                                             name="crossentropy")
     else:
-        l_loss = L.SquaredLoss(layer, l_in,
-                               name="squareloss")
+        l_loss = L.SquaredError(layer, l_in,
+                                name="squareloss")
     return [l_in.input_var], l_loss
 
 

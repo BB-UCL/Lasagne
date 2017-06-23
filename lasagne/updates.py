@@ -190,11 +190,14 @@ def exponential_moving_average(alpha, s_t, x_t, t=None, init_period=None):
     The state of the system at time t + 1.
     """
     alpha = utils.th_fx(alpha)
+    factor = T.constant(1)
     if t is not None and init_period is not None and init_period > 0:
         p = utils.th_fx(init_period)
         t = utils.th_fx(t)
         alpha *= T.minimum(1.0, (p - 1.0) * t / T.sqr(p) + T.inv(p))
-    return alpha * s_t + (1 - alpha) * x_t
+    elif t is not None:
+        factor = 1 - alpha**utils.th_fx(t + 1)
+    return (alpha * s_t + (1 - alpha) * x_t) / factor
 
 ema = exponential_moving_average
 
