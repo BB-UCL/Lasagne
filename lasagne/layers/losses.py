@@ -3,7 +3,7 @@ import theano.tensor as T
 from .. import utils
 from ..layers import Layer
 from ..random import normal, binary, multinomial
-from ..nonlinearities import softplus
+from ..nonlinearities import softplus, identity
 
 __all__ = [
     "SKFGNLossLayer",
@@ -12,7 +12,9 @@ __all__ = [
     "BinaryLogitsCrossEntropy",
     "bernoulli_logits_ll",
     "CategoricalLogitsCrossEntropy",
-    "categorical_logits_ll"
+    "categorical_logits_ll",
+    "BetaCrossEntropy",
+    "beta_ll"
 ]
 
 
@@ -271,16 +273,16 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         x, y = inputs
         assert len(curvature) == 1
-        weight = curvature[0]
+        weight = T.sqrt(curvature[0])
         p_x = T.nnet.sigmoid(x)
         if optimizer.variant == "skfgn-rp":
             v = optimizer.random_sampler(x.shape)
             cl_v = T.sqrt(p_x * (1 - p_x)) * v
-            cl_v = utils.collapse_variable(cl_v, self.repeats[0]) * T.sqrt(weight)
+            cl_v *= weight
             return cl_v, T.zeros_like(y)
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
             fake_dx = p_x - utils.th_fx(binary(x.shape, p=p_x))
-            fake_dx = utils.collapse_variable(fake_dx, self.repeats[0]) * T.sqrt(weight)
+            fake_dx *= weight
             return fake_dx, T.zeros_like(y)
         elif optimizer.variant == "kfra":
             if x.ndim == 1:
@@ -288,7 +290,7 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
             else:
                 p_x = T.flatten(p_x, outdim=2)
                 gn_x = T.diag(T.mean(p_x * (1 - p_x), axis=0))
-            gn_x *= weight
+            gn_x *= weight**2
             return gn_x, T.constant(0)
         else:
             raise ValueError("Unreachable!")
@@ -425,28 +427,31 @@ class BetaCrossEntropy(SKFGNLossLayer):
         If `target` has to be repeated some number of times.
     """
     def __init__(self, output, target,
-                 min_params=1.0 + 1e-6,
+                 min_params=1.0,
                  nonlinearity=softplus,
+                 epsilon=1e-6,
                  x_repeats=1, y_repeats=1, *args, **kwargs):
         super(BetaCrossEntropy, self).__init__((output, target),
                                                (x_repeats, y_repeats),
                                                max_inputs=2, *args, **kwargs)
         self.min_params = T.constant(min_params)
         self.nonlinearity = nonlinearity
+        self.epsilon = epsilon
 
     def get_outputs_for(self, inputs, **kwargs):
         assert len(inputs) == 2
         x, y = inputs
         assert x.ndim == y.ndim
+        x = self.nonlinearity(x) + self.min_params + self.epsilon
         x = utils.expand_variable(x, self.repeats[0])
         y = utils.expand_variable(y, self.repeats[1])
-        x = self.nonlinearity(x) + self.min_params
-        d = T.int_div(x.shape[1])
+        d = T.int_div(x.shape[1], 2)
         alpha = x[:, :d]
         beta = x[:, d:]
         # Calculate loss in a stable way
-        r = (alpha - 1) / (alpha - 1 + beta - 1)
         c = alpha + beta - 2
+        r = (alpha - 1) / c
+        y = T.clip(y, self.epsilon, 1.0 - self.epsilon)
         loss = c * T.nnet.binary_crossentropy(y, r)
         # Add the beta function values
         loss += T.gammaln(alpha) + T.gammaln(beta) - T.gammaln(alpha + beta)
@@ -459,30 +464,65 @@ class BetaCrossEntropy(SKFGNLossLayer):
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         x, y = inputs
         assert len(curvature) == 1
-        weight = curvature[0]
-        p_x = T.nnet.sigmoid(x)
+        weight = T.sqrt(curvature[0])
+        x_f = self.nonlinearity(x) + self.min_params
+        d = T.int_div(x.shape[1], 2)
+        alpha = x_f[:, :d]
+        beta = x_f[:, d:]
         if optimizer.variant == "skfgn-rp":
-            v = optimizer.random_sampler(x.shape)
-            cl_v = T.sqrt(p_x * (1 - p_x)) * v
-            cl_v = utils.collapse_variable(cl_v, self.repeats[0]) * T.sqrt(weight)
-            return cl_v, T.zeros_like(y)
+            va, vb = optimizer.random_sampler((alpha.shape, beta.shape))
+            da = T.tri_gamma(alpha)
+            db = T.tri_gamma(beta)
+            dab = T.tri_gamma(alpha + beta)
+            chol_x = T.sqrt(da - dab)
+            chol_y = - dab / chol_x
+            chol_z = T.sqrt(db - dab - T.sqr(chol_y))
+            v1 = chol_x * va
+            v2 = chol_y * va + chol_z * vb
+            cl_v = T.concatenate((v1, v2), axis=1)
+            cl_v *= weight
+            return T.Lop(x_f, x, cl_v), T.zeros_like(y)
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
+            raise NotImplementedError
             fake_dx = p_x - utils.th_fx(binary(x.shape, p=p_x))
             fake_dx = utils.collapse_variable(fake_dx, self.repeats[0]) * T.sqrt(weight)
             return fake_dx, T.zeros_like(y)
         elif optimizer.variant == "kfra":
-            if x.ndim == 1:
-                gn_x = T.diag(p_x * (1 - p_x))
-            else:
-                p_x = T.flatten(p_x, outdim=2)
-                gn_x = T.diag(T.mean(p_x * (1 - p_x), axis=0))
-            gn_x *= weight
+            da = T.mean(T.tri_gamma(alpha), axis=0)
+            db = T.mean(T.tri_gamma(beta), axis=0)
+            dab = T.mean(T.tri_gamma(alpha + beta), axis=0)
+            gn_x1 = T.concatenate((T.diag(da), T.diag(dab)), axis=0)
+            gn_x2 = T.concatenate((T.diag(dab), T.diag(db)), axis=0)
+            gn_x = T.concatenate((gn_x1, gn_x2), axis=1)
+            if self.nonlinearity != identity:
+                a = T.Lop(outputs[0], x_f, T.ones_like(x))
+                gn_x *= T.dot(a.T, a) / utils.th_fx(x.shape[0])
             return gn_x, T.constant(0)
         else:
             raise ValueError("Unreachable!")
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
         x, y = inputs_map[self]
-        sigmoid = T.nnet.sigmoid(x)
-        hess = sigmoid * (1 - sigmoid)
-        return utils.gauss_newton_product(x, hess, params, v1, v2)
+        x_f = self.nonlinearity(x) + self.min_params
+        Jv1 = utils.Rop(x_f, params, v1)
+        Jv2 = utils.Rop(x_f, params, v2) if v2 else Jv1
+        d = T.int_div(x.shape[1], 2)
+        alpha = x_f[:, :d]
+        beta = x_f[:, d:]
+        v1a = Jv1[:, :d]
+        v1b = Jv1[:, d:]
+        v2a = Jv2[:, :d]
+        v2b = Jv2[:, d:]
+        da = T.mean(T.tri_gamma(alpha), axis=0)
+        db = T.mean(T.tri_gamma(beta), axis=0)
+        dab = T.mean(T.tri_gamma(alpha + beta), axis=0)
+        gn = v1a * (da - dab) * v2a - dab * (v1a * v2b + v1b * v2a) + v1b * (db - dab) * v2b
+        return T.mean(T.sum(gn, axis=1), axis=0)
+
+
+def beta_ll(output, target, x_repeats=1, y_repeats=1, *args, **kwargs):
+    layer = BetaCrossEntropy(output, target,
+                             x_repeats=x_repeats,
+                             y_repeats=y_repeats,
+                             *args, **kwargs)
+    return SumLosses(layer, mode="merge", weights=[-1])

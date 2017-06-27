@@ -299,6 +299,7 @@ def uniform_ball(shape, radius=None, dtype=None, random=None):
     norm = T.sqrt(T.sum(T.sqr(x), axis=-1, keepdims=True))
     return distance / norm * x
 
+
 @multi_sampler
 def matrix_normal(shape, M=None, A=None, B=None, dtype=None):
     dtype = dtype or theano.config.floatX
@@ -323,3 +324,10 @@ def matrix_normal(shape, M=None, A=None, B=None, dtype=None):
         M = M.dimshuffle(['x', 0, 1])
         return M + (X.dimshuffle([0, 2, 1]).dot(A.T)).dimshuffle([0, 2, 1]).dot(B)
 
+
+def beta(alpha, beta, dtype=None):
+    raise NotImplementedError
+    dtype = dtype or theano.config.floatX
+    gamma_alpha = 2
+    gamma_beta = 2
+    return gamma_alpha / (gamma_alpha + gamma_beta)
