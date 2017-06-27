@@ -155,7 +155,7 @@ class GaussianSampler(Layer):
             nk = utils.th_fx(epsilon.shape[0])
             ge = T.tile(curvature[0], (2, 2))
             eps_extended = T.concatenate((T.ones_like(flat_epsilon), flat_epsilon), axis=1)
-            return ge * T.dot(eps_extended.T, eps_extended) / nk
+            return ge * T.dot(eps_extended.T, eps_extended) / nk,
         elif optimizer.variant == "kfac*":
             return T.constant(0),
         else:
@@ -259,7 +259,7 @@ class GaussianKL(SKFGNLossLayer):
 
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         assert len(curvature) == 1
-        curvature = curvature[0]
+        weight = curvature[0]
         g_q, g_p = None, None
         if optimizer.variant == "skfgn-rp":
             q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, True)
@@ -284,7 +284,7 @@ class GaussianKL(SKFGNLossLayer):
                 g_q_sigma = v_q_sigma * T.sqrt(T.inv(T.sqr(p_sigma)) + T.inv(T.sqr(q_sigma)))
                 g_q_sigma = utils.collapse_variable(g_q_sigma, self.repeats[0])
                 g_q = T.concatenate((g_q_mu, g_q_sigma), axis=1)
-                g_q *= T.sqrt(curvature)
+                g_q *= T.sqrt(weight)
             if self.state == 1 or self.state == 3:
                 # P
                 g_p_mu = v_p_mu / T.sqr(p_sigma)
@@ -292,7 +292,7 @@ class GaussianKL(SKFGNLossLayer):
                 g_p_sigma = 2 * v_p_sigma / T.sqr(p_sigma)
                 g_p_sigma = utils.collapse_variable(g_p_sigma, self.repeats[1])
                 g_p = T.concatenate((g_p_mu, g_p_sigma), axis=1)
-                g_p *= T.sqrt(curvature)
+                g_p *= T.sqrt(weight)
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
             q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, False)
             # Samples
@@ -313,13 +313,13 @@ class GaussianKL(SKFGNLossLayer):
                 d_q_mu = fake_q / q_sigma
                 d_q_sigma = (T.sqr(fake_q) - 1) / q_sigma
                 d_q = T.concatenate((d_q_mu, d_q_sigma), axis=1)
-                g_q = d_q * T.sqrt(curvature)
+                g_q = d_q * T.sqrt(weight)
             if self.state == 1 or self.state == 3:
                 # P
                 d_p_mu = fake_p / p_sigma
                 d_p_sigma = (T.sqr(fake_p) - 1) / p_sigma
                 d_p = T.concatenate((d_p_mu, d_p_sigma), axis=1)
-                g_p = d_p * T.sqrt(curvature)
+                g_p = d_p * T.sqrt(weight)
         elif optimizer.variant == "kfra":
             q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, True)
             if self.state == 1 or self.state == 2:
@@ -330,13 +330,13 @@ class GaussianKL(SKFGNLossLayer):
                     g_q_mu = T.ones(q_sigma.shape[1:])
                 g_q_sigma = T.mean(T.inv(T.sqr(p_sigma)) + T.inv(T.sqr(q_sigma)), axis=0)
                 g_q = T.diag(T.concatenate((g_q_mu, g_q_sigma), axis=0))
-                g_q *= curvature
+                g_q *= weight
             if self.state == 1 or self.state == 3:
                 # P
                 g_p_mu = T.mean(T.inv(p_sigma), axis=0)
                 g_p_sigma = 2 * g_p_mu
                 g_p = T.diag(T.concatenate((g_p_mu, g_p_sigma), axis=0))
-                g_p *= curvature
+                g_p *= weight
         else:
             raise ValueError("Unreachable!")
         if self.state == 1:
@@ -479,15 +479,15 @@ class GaussianLikelihood(SKFGNLossLayer):
                     return fake_dx, fake_dmu
                 elif optimizer.variant == "kfra":
                     if x.ndim == 1:
-                        gn_x = T.sqrt(weight)
-                        gn_mu = T.sqrt(weight)
+                        gn_x = weight
+                        gn_mu = weight
                     elif x.ndim == 2:
                         x = T.flatten(x, outdim=2)
                         gn_x = T.eye(x.shape[1])
-                        gn_x *= T.sqrt(weight)
+                        gn_x *= weight
                         mu = T.flatten(mu, outdim=2)
                         gn_mu = T.eye(mu.shape[1])
-                        gn_mu *= T.sqrt(weight)
+                        gn_mu *= weight
                     else:
                         raise ValueError("KFRA can not work on more than 2 dimensions.")
                     return gn_x, gn_mu
@@ -504,21 +504,21 @@ class GaussianLikelihood(SKFGNLossLayer):
             if optimizer.variant == "skfgn-rp":
                 cl_v = optimizer.random_sampler(x.shape)
                 cl_v *= T.sqrt(weight)
-                return cl_v, None
+                return cl_v,
             elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
                 fake_dx = normal(x.shape)
                 fake_dx *= T.sqrt(weight)
-                return fake_dx, None
+                return fake_dx,
             elif optimizer.variant == "kfra":
                 if x.ndim == 1:
-                    gn_x = T.sqrt(weight)
+                    gn_x = weight
                 elif x.ndim == 2:
                     x = T.flatten(x, outdim=2)
                     gn_x = T.eye(x.shape[1])
-                    gn_x *= T.sqrt(weight)
+                    gn_x *= weight
                 else:
                     raise ValueError("KFRA can not work on more than 2 dimensions.")
-                return gn_x, None
+                return gn_x,
             else:
                 raise ValueError("Unreachable!")
 

@@ -359,9 +359,11 @@ class BaseConvLayer(Layer):
             return w,
 
     def image_to_mat(self, image):
-        if self.pad not in ("same", "valid", "half"):
+        if self.pad == as_tuple(0, len(self.pad)):
+            pad = "valid"
+        if pad not in ("same", "valid", "half"):
             raise ValueError("SKFGN supports only pad='same', 'valid' and 'full'")
-        border_mode = 'half' if self.pad == 'same' else self.pad
+        border_mode = 'half' if pad == 'same' else pad
         _, c_in, d1, d2 = self.W.shape.eval()
         mat = images2neibs(image.dimshuffle(1, 0, 2, 3), (d1, d2), self.stride, mode=border_mode)
         mat = T.reshape(mat, (c_in, -1, d1 * d2)).dimshuffle(1, 0, 2).reshape((-1, c_in * d1 * d2))
@@ -687,8 +689,11 @@ class Conv2DLayer(BaseConvLayer):
         assert len(inputs) == 1
         assert len(curvature) == 1
         assert len(outputs) == 1
-        if self.pad not in ("same", "valid", "half"):
-            raise ValueError("SKFGN supports only pad='same', 'valid' and 'full'")
+        if self.pad == as_tuple(0, len(self.pad)):
+            pad = "valid"
+        if pad not in ("same", "valid", "half"):
+            raise ValueError("SKFGN supports only pad='same', 'valid' and 'full', not {}"
+                             .format(self.pad))
 
         # Extract the pre-activation of the layer
         bias = self.b is not None
