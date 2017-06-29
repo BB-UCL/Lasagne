@@ -429,18 +429,42 @@ class Optimizer(object):
 
         # Helper function to create Kronecker-Factored matrices
         if self.variant == "kfra":
-            def make_matrix(owning_layer, a_dim, b_dim, a, b, params, **kwargs):
-                kf_mat = StandardMatrix(owning_layer, a_dim, b_dim, a, b,
-                                        params, k=self.tikhonov_damping,
-                                        update_fn=self.curvature_avg,
-                                        **kwargs)
+            def make_matrix(owning_layer, a_dim, b_dim, a, b, params, name=None):
+                name = name + "_" if name else ""
+                a_factor = FullMatrix(a_dim, a,
+                                      layer=owning_layer, params=params,
+                                      k=0.0,
+                                      init_k=self.tikhonov_damping,
+                                      update_fn=self.curvature_avg,
+                                      name=name + "kf_a")
+                b_factor = FullMatrix(b_dim, b,
+                                      layer=owning_layer, params=params,
+                                      k=0.0,
+                                      init_k=self.tikhonov_damping,
+                                      update_fn=self.curvature_avg,
+                                      name=name + "kf_b")
+                kf_mat = KroneckerFactoredMatrix((a_factor, b_factor),
+                                                 owning_layer,
+                                                 k=self.tikhonov_damping)
                 kf_matrices.append(kf_mat)
         else:
-            def make_matrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt, params, **kwargs):
-                kf_mat = SqrtMatrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt,
-                                    params, k=self.tikhonov_damping,
-                                    update_fn=self.curvature_avg,
-                                    **kwargs)
+            def make_matrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt, params, name=None):
+                name = name + "_" if name else ""
+                a_factor = SqrtMatrix(a_dim, a_sqrt,
+                                      layer=owning_layer, params=params,
+                                      k=0.0,
+                                      init_k=self.tikhonov_damping,
+                                      update_fn=self.curvature_avg,
+                                      name=name + "kf_a")
+                b_factor = SqrtMatrix(b_dim, b_sqrt,
+                                      layer=owning_layer, params=params,
+                                      k=0.0,
+                                      init_k=self.tikhonov_damping,
+                                      update_fn=self.curvature_avg,
+                                      name=name + "kf_b")
+                kf_mat = KroneckerFactoredMatrix((a_factor, b_factor),
+                                                 owning_layer,
+                                                 k=self.tikhonov_damping)
                 kf_matrices.append(kf_mat)
 
         if self.debug:
@@ -698,271 +722,472 @@ def optimizer_from_dict(primitive_dict):
     return Optimizer(**primitive_dict)
 
 
-class KroneckerFactoredMatrix(object):
-    def __init__(self,
-                 layer,
-                 a_dim,
-                 b_dim,
-                 params,
+class PositiveSemiDefiniteMatrix(object):
+    def __init__(self, dim,
+                 transpose=False,
+                 layer=None,
+                 params=None,
                  k=1e-3,
+                 init_k=None,
                  name=None,
-                 update_fn=None,
-                 norm=utils.mean_trace_norm):
+                 update_fn=None):
+        self.dim = dim
+        # self.transpose = transpose
         self.layer = layer
-        self.name = "" if name is None else name + "_"
-        self.a_dim = a_dim
-        self.b_dim = b_dim
-        self.params = params
+        self.params = params if params else ()
         self.k = k
+        self.init_k = init_k if init_k else k
+        self.name = name if name else ""
         self.update_fn = update_fn
-        self.norm = norm
         if update_fn is not None:
             self.make_persistent()
         else:
-            self.a_persistent = None
-            self.b_persistent = None
+            self.persistent = None
+        self.update = None
 
     def make_persistent(self):
         try:
-            value = self.a("raw").eval()
+            value = self.get("raw").eval()
         except :
-            value = np.eye(self.a_dim) * self.k
-        self.a_persistent = self.layer.add_param(
-            utils.floatX(value), (self.a_dim, self.a_dim),
-            name=self.name + "KF_A",
-            broadcast_unit_dims=False,
-            trainable=False,
-            regularizable=False,
-            kf=True)
-        try:
-            value = self.b("raw").eval()
-        except :
-            value = np.eye(self.b_dim) * self.k
-        self.b_persistent = self.layer.add_param(
-            utils.floatX(value), (self.b_dim, self.b_dim),
-            name=self.name + "KF_B",
-            broadcast_unit_dims=False,
-            trainable=False,
-            regularizable=False,
-            kf=True)
-
-    def a(self, use):
-        assert use in ("updates", "raw", "persistent")
-        if use == "persistent":
-            return self.a_persistent
+            value = np.eye(self.dim) * self.init_k
+        if self.layer is not None:
+            self.persistent = self.layer.add_param(
+                utils.floatX(value), (self.dim, self.dim),
+                name=self.name + "_psd",
+                broadcast_unit_dims=False,
+                trainable=False,
+                regularizable=False,
+                psd=True)
         else:
-            raise NotImplementedError
+            self.persistent = theano.shared(utils.floatX(value),
+                                            name=self.name + "_psd")
 
-    def b(self, use):
-        assert use in ("updates", "raw", "persistent")
+    def get_raw(self):
+        raise NotImplementedError
+
+    def get(self, use="updates"):
         if use == "persistent":
-            return self.b_persistent
+            return self.persistent
+        elif use == "updates":
+            if self.update is not None:
+                return self.update
+            else:
+                return self.get_raw()
+        elif use == "raw":
+            return self.get_raw()
         else:
-            raise NotImplementedError
+            raise ValueError("Unrecognized use=" + use)
 
     def get_updates(self):
-        if self.a_persistent is None:
-            return ()
-        else:
-            return (self.a_persistent, self.a("updates")), \
-                   (self.b_persistent, self.b("updates"))
+            if self.persistent is None:
+                return ()
+            else:
+                return self.persistent, self.get("updates"),
 
-    def linear_solve(self, v, use="updates", right_multiply=True):
+    def norm(self, norm_fn, use="updates"):
+        return norm_fn(self.get(use))
+
+    # def transpose(self):
+    #     transposed = copy(self)
+    #     transposed.transpose = not self.transpose
+    #     return transposed
+
+    def linear_solve(self, v, use="updates", scale=None, k_override=None, right_multiply=True):
         assert v.ndim == 2
-        a, b = self.a(use), self.b(use)
-        if self.a_dim == 1 and self.b_dim == 1:
-            return v / (a * b + self.k)
-        elif self.a_dim == 1:
-            b += T.eye(self.b_dim) * self.k
-            if right_multiply:
-                return utils.linear_solve(b, v, "symmetric") / a[0, 0]
-            else:
-                return utils.linear_solve(b, v.T, "symmetric").T / a[0, 0]
-        elif self.b_dim == 1:
-            a += T.eye(self.a_dim) * self.k
-            if right_multiply:
-                return utils.linear_solve(a, v.T, "symmetric").T / b[0, 0]
-            else:
-                return utils.linear_solve(a, v, "symmetric") / b[0, 0]
+        mat = self.get(use)
+        mat *= scale if scale else 1
+        k = k_override if k_override else self.k
+        mat += T.eye(self.dim) * k
+        if self.dim == 1:
+            return v / mat[0, 0]
+        elif right_multiply:
+            return utils.linear_solve(mat, v, "symmetric")
         else:
-            omega = T.sqrt(self.norm(a) / self.norm(b))
-            add_to_report(self.layer.name + "_omega", omega)
-            a /= omega
-            b *= omega
-            a += T.eye(self.a_dim) * T.sqrt(self.k)
-            b += T.eye(self.b_dim) * T.sqrt(self.k)
-            if right_multiply:
-                v1 = utils.linear_solve(b, v, "symmetric")
-                v2 = utils.linear_solve(a, v1.T, "symmetric").T
-            else:
-                v1 = utils.linear_solve(a, v, "symmetric")
-                v2 = utils.linear_solve(b, v1.T, "symmetric").T
+            return utils.linear_solve(mat, v.T, "symmetric").T
+
+    def cholesky_product(self, v, use="updates", scale=None, k_override=None, right_multiply=True):
+        assert v.ndim == 2
+        mat = self.get(use)
+        mat *= scale if scale else 1
+        k = k_override if k_override else self.k
+        mat += T.eye(self.dim) * k
+        if self.dim == 1:
+            return v / T.sqrt(mat[0, 0])
+        cholesky = T.slinalg.cholesky(mat)
+        # if self.transpose:
+        #     cholesky = cholesky.T
+        if right_multiply:
+            return T.dot(cholesky, v)
+        else:
+            return T.dot(cholesky.T, v)
+
+PSD = PositiveSemiDefiniteMatrix
+
+
+class FullMatrix(PSD):
+    def __init__(self, dim,
+                 matrix,
+                 transpose=False,
+                 layer=None,
+                 params=None,
+                 k=1e-3,
+                 init_k=None,
+                 name=None,
+                 update_fn=None):
+        self.raw_matrix = matrix
+        super(FullMatrix, self).__init__(dim, transpose, layer,
+                                         params, k, init_k, name,
+                                         update_fn)
+        if self.update_fn is not None:
+            self.update = self.update_fn(self.persistent, self.raw_matrix)
+
+    def get_raw(self):
+        return self.raw_matrix
+
+
+class SqrtMatrix(PSD):
+    def __init__(self, dim,
+                 sqrt_matrix,
+                 n=None,
+                 transpose=False,
+                 layer=None,
+                 params=None,
+                 k=1e-3,
+                 init_k=None,
+                 name=None,
+                 update_fn=None):
+        self.sqrt_matrix = sqrt_matrix
+        self.n = n if n else sqrt_matrix.shape[0]
+        super(SqrtMatrix, self).__init__(dim, transpose, layer,
+                                         params, k, init_k, name,
+                                         update_fn)
+        if self.update_fn is not None:
+            self.update = self.update_fn(self.persistent, self.get_raw())
+
+    def get_raw(self):
+        return T.dot(self.sqrt_matrix.T, self.sqrt_matrix) / utils.th_fx(self.n)
+
+
+class KroneckerFactoredMatrix(object):
+    """
+    A Kronecker factored matrix A kron B
+
+    For linear solve it used the identity:
+    (A kron B)^-1 vec(V) = vec(B^-1 V A^-1)
+    """
+    def __init__(self,
+                 factors,
+                 layer=None,
+                 k=1e-3,
+                 norm_fn=utils.mean_trace_norm):
+        assert len(factors) > 1
+        if len(factors) > 2:
+            raise NotImplementedError
+        self.factors = factors
+        self.params = factors[0].params
+        for f in factors[1:]:
+            assert all(p1 == p2 for p1, p2 in zip(self.params, f.params))
+        self.layer = layer
+        self.dim = factors[0].dim * factors[1].dim
+        self.k = k
+        self.norm_fn = norm_fn
+
+    def get_updates(self):
+        return tuple(f.get_updates() for f in self.factors)
+
+    def linear_solve(self, v, use="updates", scale=None, k_override=None, right_multiply=True):
+        a, b = self.factors
+        k = k_override if k_override else self.k
+        scale = scale if scale else 1
+        if a.dim == 1 and b.dim == 1:
+            mat = scale * a.get(use)[0, 0] * b.get(use)[0, 0]
+            return v / (mat + k)
+        elif a.dim == 1:
+            scale *=  a.get(use)[0, 0]
+            return b.linear_solve(v, use, scale, k, right_multiply)
+        elif b.dim == 1:
+            scale *= b.get(use)[0, 0]
+            return a.linear_solve(v, use, scale, k, right_multiply)
+        else:
+            omega = T.sqrt(a.norm(self.norm_fn, use) / b.norm(self.norm_fn, use))
+            name = self.layer.name + "_" if self.layer else ""
+            name += "omega"
+            add_to_report(name, omega)
+            k_override = T.sqrt(k)
+            a_scale = T.inv(omega)
+            b_scale = omega
+            if not right_multiply:
+                a, b, a_scale, b_scale = b, a, b_scale, a_scale
+            v1 = b.linear_solve(v, use, b_scale, k_override, True)
+            v2 = a.linear_solve(v1, use, a_scale, k_override, False)
             return v2
 
-    def cholesky_product(self, v, use="updates", right_multiply=True):
-        assert v.ndim == 2
-        a, b = self.a(use), self.b(use)
-        c_a = T.slinalg.Cholesky(a)
-        c_b = T.slinalg.Cholesky(b)
-        if right_multiply:
-            return T.dot(T.dot(c_b.T, v), c_a.T)
-        else:
-            return T.dot(T.dot(c_a.T, v), c_b.T)
+
+# class KroneckerFactoredMatrix(object):
+#     def __init__(self,
+#                  layer,
+#                  a_dim,
+#                  b_dim,
+#                  params,
+#                  k=1e-3,
+#                  name=None,
+#                  update_fn=None,
+#                  norm=utils.mean_trace_norm):
+#         self.layer = layer
+#         self.name = "" if name is None else name + "_"
+#         self.a_dim = a_dim
+#         self.b_dim = b_dim
+#         self.params = params
+#         self.k = k
+#         self.update_fn = update_fn
+#         self.norm = norm
+#         if update_fn is not None:
+#             self.make_persistent()
+#         else:
+#             self.a_persistent = None
+#             self.b_persistent = None
+#
+#     def make_persistent(self):
+#         try:
+#             value = self.a("raw").eval()
+#         except :
+#             value = np.eye(self.a_dim) * self.k
+#         self.a_persistent = self.layer.add_param(
+#             utils.floatX(value), (self.a_dim, self.a_dim),
+#             name=self.name + "KF_A",
+#             broadcast_unit_dims=False,
+#             trainable=False,
+#             regularizable=False,
+#             kf=True)
+#         try:
+#             value = self.b("raw").eval()
+#         except :
+#             value = np.eye(self.b_dim) * self.k
+#         self.b_persistent = self.layer.add_param(
+#             utils.floatX(value), (self.b_dim, self.b_dim),
+#             name=self.name + "KF_B",
+#             broadcast_unit_dims=False,
+#             trainable=False,
+#             regularizable=False,
+#             kf=True)
+#
+#     def a(self, use):
+#         assert use in ("updates", "raw", "persistent")
+#         if use == "persistent":
+#             return self.a_persistent
+#         else:
+#             raise NotImplementedError
+#
+#     def b(self, use):
+#         assert use in ("updates", "raw", "persistent")
+#         if use == "persistent":
+#             return self.b_persistent
+#         else:
+#             raise NotImplementedError
+#
+#     def get_updates(self):
+#         if self.a_persistent is None:
+#             return ()
+#         else:
+#             return (self.a_persistent, self.a("updates")), \
+#                    (self.b_persistent, self.b("updates"))
+#
+#     def linear_solve(self, v, use="updates", right_multiply=True):
+#         assert v.ndim == 2
+#         a, b = self.a(use), self.b(use)
+#         if self.a_dim == 1 and self.b_dim == 1:
+#             return v / (a * b + self.k)
+#         elif self.a_dim == 1:
+#             b += T.eye(self.b_dim) * self.k
+#             if right_multiply:
+#                 return utils.linear_solve(b, v, "symmetric") / a[0, 0]
+#             else:
+#                 return utils.linear_solve(b, v.T, "symmetric").T / a[0, 0]
+#         elif self.b_dim == 1:
+#             a += T.eye(self.a_dim) * self.k
+#             if right_multiply:
+#                 return utils.linear_solve(a, v.T, "symmetric").T / b[0, 0]
+#             else:
+#                 return utils.linear_solve(a, v, "symmetric") / b[0, 0]
+#         else:
+#             omega = T.sqrt(self.norm(a) / self.norm(b))
+#             add_to_report(self.layer.name + "_omega", omega)
+#             a /= omega
+#             b *= omega
+#             a += T.eye(self.a_dim) * T.sqrt(self.k)
+#             b += T.eye(self.b_dim) * T.sqrt(self.k)
+#             if right_multiply:
+#                 v1 = utils.linear_solve(b, v, "symmetric")
+#                 v2 = utils.linear_solve(a, v1.T, "symmetric").T
+#             else:
+#                 v1 = utils.linear_solve(a, v, "symmetric")
+#                 v2 = utils.linear_solve(b, v1.T, "symmetric").T
+#             return v2
+#
+#     def cholesky_product(self, v, use="updates", right_multiply=True):
+#         assert v.ndim == 2
+#         a, b = self.a(use), self.b(use)
+#         c_a = T.slinalg.Cholesky(a)
+#         c_b = T.slinalg.Cholesky(b)
+#         if right_multiply:
+#             return T.dot(T.dot(c_b.T, v), c_a.T)
+#         else:
+#             return T.dot(T.dot(c_a.T, v), c_b.T)
 
 
-class StandardMatrix(KroneckerFactoredMatrix):
-    def __init__(self,
-                 layer,
-                 a_dim,
-                 b_dim,
-                 a_raw,
-                 b_raw,
-                 params,
-                 *args,
-                 **kwargs):
-        self.a_raw = a_raw
-        self.b_raw = b_raw
-        super(StandardMatrix, self).__init__(layer, a_dim, b_dim, params,
-                                             *args, **kwargs)
-        if self.update_fn is not None:
-            a_upd = self.update_fn(self.a_persistent, self.a_raw)
-            b_upd = self.update_fn(self.b_persistent, self.b_raw)
-            self.updates = [a_upd, b_upd]
-        else:
-            self.updates = None
-
-    def a(self, use):
-        if use == "persistent":
-            return self.a_persistent
-        elif use == "raw":
-            return self.a_raw
-        elif use == "updates":
-            if self.updates is not None:
-                return self.updates[0]
-            else:
-                return self.a_raw
-        else:
-            raise ValueError("Unrecognized use=" + use)
-
-    def b(self, use):
-        if use == "persistent":
-            return self.b_persistent
-        elif use == "raw":
-            return self.b_raw
-        elif use == "updates":
-            if self.updates is not None:
-                return self.updates[1]
-            else:
-                return self.b_raw
-        else:
-            raise ValueError("Unrecognized use=" + use)
-
-
-class SqrtMatrix(KroneckerFactoredMatrix):
-    def __init__(self,
-                 layer,
-                 a_dim,
-                 b_dim,
-                 a_sqrt,
-                 b_sqrt,
-                 params,
-                 n_a=None,
-                 n_b=None,
-                 *args,
-                 **kwargs):
-        self.a_sqrt = a_sqrt
-        self.n_a = a_sqrt.shape[0] if n_a is None else n_a
-        self.b_sqrt = b_sqrt
-        self.n_b = b_sqrt.shape[0] if n_b is None else n_b
-        super(SqrtMatrix, self).__init__(layer, a_dim, b_dim, params,
-                                         *args, **kwargs)
-        if self.update_fn is not None:
-            a_upd = self.update_fn(self.a_persistent, self.a("raw"))
-            b_upd = self.update_fn(self.b_persistent, self.b("raw"))
-            self.updates = [a_upd, b_upd]
-        else:
-            self.updates = None
-
-    def a(self, use):
-        if use == "persistent":
-            return self.a_persistent
-        elif use == "raw":
-            return T.dot(self.a_sqrt.T, self.a_sqrt) / utils.th_fx(self.n_a)
-        elif use == "updates":
-            if self.updates is not None:
-                return self.updates[0]
-            else:
-                return self.a(use="raw")
-        else:
-            raise ValueError("Unrecognized use=" + use)
-
-    def b(self, use):
-        if use == "persistent":
-            return self.b_persistent
-        elif use == "raw":
-            return T.dot(self.b_sqrt.T, self.b_sqrt) / utils.th_fx(self.n_b)
-        elif use == "updates":
-            if self.updates is not None:
-                return self.updates[1]
-            else:
-                return self.b(use="raw")
-        else:
-            raise ValueError("Unrecognized use=" + use)
-
-
-class CholeskyMatrix(KroneckerFactoredMatrix):
-    def __init__(self,
-                 layer,
-                 a_dim,
-                 b_dim,
-                 a_cholesky,
-                 b_cholesky,
-                 params,
-                 n_a=None,
-                 n_b=None,
-                 *args,
-                 **kwargs):
-        super(CholeskyMatrix, self).__init__(layer, a_dim, b_dim, params,
-                                             *args, **kwargs)
-        self.a_cholesky = a_cholesky
-        self.n_a = a_cholesky.shape[0] if n_a is None else n_a
-        self.b_cholesky = b_cholesky
-        self.n_b = b_cholesky.shape[0] if n_b is None else n_b
-        if self.update_fn is not None:
-            a_upd = self.update_fn(self.a_persistent, self.a("raw"))
-            b_upd = self.update_fn(self.b_persistent, self.b("raw"))
-            self.updates = [a_upd, b_upd]
-
-    def a(self, use):
-        if use == "persistent":
-            return self.a_persistent
-        elif use == "raw":
-            return T.dot(self.a_cholesky.T, self.a_cholesky) / utils.th_fx(self.n_a)
-        elif use == "updates":
-            if self.updates is not None:
-                return self.updates[0]
-            else:
-                return T.dot(self.a_cholesky.T, self.a_cholesky) / utils.th_fx(self.n_a)
-        else:
-            raise ValueError("Unrecognized use=" + use)
-
-    def b(self, use):
-        if use == "persistent":
-            return self.b_persistent
-        elif use == "raw":
-            return T.dot(self.b_cholesky.T, self.b_cholesky) / utils.th_fx(self.n_b)
-        elif use == "updates":
-            if self.updates is not None:
-                return self.updates[1]
-            else:
-                return T.dot(self.b_cholesky.T, self.b_cholesky) / utils.th_fx(self.n_b)
-        else:
-            raise ValueError("Unrecognized use=" + use)
-
-    def cholesky_product(self, v, use="updates", right_multiply=True):
-        assert v.ndim == 2
-        if right_multiply:
-            return T.dot(T.dot(self.b_cholesky.T, v), self.a_cholesky.T)
-        else:
-            return T.dot(T.dot(self.a_cholesky.T, v), self.b_cholesky.T)
+# class StandardMatrix(KroneckerFactoredMatrix):
+#     def __init__(self,
+#                  layer,
+#                  a_dim,
+#                  b_dim,
+#                  a_raw,
+#                  b_raw,
+#                  params,
+#                  *args,
+#                  **kwargs):
+#         self.a_raw = a_raw
+#         self.b_raw = b_raw
+#         super(StandardMatrix, self).__init__(layer, a_dim, b_dim, params,
+#                                              *args, **kwargs)
+#         if self.update_fn is not None:
+#             a_upd = self.update_fn(self.a_persistent, self.a_raw)
+#             b_upd = self.update_fn(self.b_persistent, self.b_raw)
+#             self.updates = [a_upd, b_upd]
+#         else:
+#             self.updates = None
+#
+#     def a(self, use):
+#         if use == "persistent":
+#             return self.a_persistent
+#         elif use == "raw":
+#             return self.a_raw
+#         elif use == "updates":
+#             if self.updates is not None:
+#                 return self.updates[0]
+#             else:
+#                 return self.a_raw
+#         else:
+#             raise ValueError("Unrecognized use=" + use)
+#
+#     def b(self, use):
+#         if use == "persistent":
+#             return self.b_persistent
+#         elif use == "raw":
+#             return self.b_raw
+#         elif use == "updates":
+#             if self.updates is not None:
+#                 return self.updates[1]
+#             else:
+#                 return self.b_raw
+#         else:
+#             raise ValueError("Unrecognized use=" + use)
+#
+#
+# class SqrtMatrix(KroneckerFactoredMatrix):
+#     def __init__(self,
+#                  layer,
+#                  a_dim,
+#                  b_dim,
+#                  a_sqrt,
+#                  b_sqrt,
+#                  params,
+#                  n_a=None,
+#                  n_b=None,
+#                  *args,
+#                  **kwargs):
+#         self.a_sqrt = a_sqrt
+#         self.n_a = a_sqrt.shape[0] if n_a is None else n_a
+#         self.b_sqrt = b_sqrt
+#         self.n_b = b_sqrt.shape[0] if n_b is None else n_b
+#         super(SqrtMatrix, self).__init__(layer, a_dim, b_dim, params,
+#                                          *args, **kwargs)
+#         if self.update_fn is not None:
+#             a_upd = self.update_fn(self.a_persistent, self.a("raw"))
+#             b_upd = self.update_fn(self.b_persistent, self.b("raw"))
+#             self.updates = [a_upd, b_upd]
+#         else:
+#             self.updates = None
+#
+#     def a(self, use):
+#         if use == "persistent":
+#             return self.a_persistent
+#         elif use == "raw":
+#             return T.dot(self.a_sqrt.T, self.a_sqrt) / utils.th_fx(self.n_a)
+#         elif use == "updates":
+#             if self.updates is not None:
+#                 return self.updates[0]
+#             else:
+#                 return self.a(use="raw")
+#         else:
+#             raise ValueError("Unrecognized use=" + use)
+#
+#     def b(self, use):
+#         if use == "persistent":
+#             return self.b_persistent
+#         elif use == "raw":
+#             return T.dot(self.b_sqrt.T, self.b_sqrt) / utils.th_fx(self.n_b)
+#         elif use == "updates":
+#             if self.updates is not None:
+#                 return self.updates[1]
+#             else:
+#                 return self.b(use="raw")
+#         else:
+#             raise ValueError("Unrecognized use=" + use)
+#
+#
+# class CholeskyMatrix(KroneckerFactoredMatrix):
+#     def __init__(self,
+#                  layer,
+#                  a_dim,
+#                  b_dim,
+#                  a_cholesky,
+#                  b_cholesky,
+#                  params,
+#                  n_a=None,
+#                  n_b=None,
+#                  *args,
+#                  **kwargs):
+#         super(CholeskyMatrix, self).__init__(layer, a_dim, b_dim, params,
+#                                              *args, **kwargs)
+#         self.a_cholesky = a_cholesky
+#         self.n_a = a_cholesky.shape[0] if n_a is None else n_a
+#         self.b_cholesky = b_cholesky
+#         self.n_b = b_cholesky.shape[0] if n_b is None else n_b
+#         if self.update_fn is not None:
+#             a_upd = self.update_fn(self.a_persistent, self.a("raw"))
+#             b_upd = self.update_fn(self.b_persistent, self.b("raw"))
+#             self.updates = [a_upd, b_upd]
+#
+#     def a(self, use):
+#         if use == "persistent":
+#             return self.a_persistent
+#         elif use == "raw":
+#             return T.dot(self.a_cholesky.T, self.a_cholesky) / utils.th_fx(self.n_a)
+#         elif use == "updates":
+#             if self.updates is not None:
+#                 return self.updates[0]
+#             else:
+#                 return T.dot(self.a_cholesky.T, self.a_cholesky) / utils.th_fx(self.n_a)
+#         else:
+#             raise ValueError("Unrecognized use=" + use)
+#
+#     def b(self, use):
+#         if use == "persistent":
+#             return self.b_persistent
+#         elif use == "raw":
+#             return T.dot(self.b_cholesky.T, self.b_cholesky) / utils.th_fx(self.n_b)
+#         elif use == "updates":
+#             if self.updates is not None:
+#                 return self.updates[1]
+#             else:
+#                 return T.dot(self.b_cholesky.T, self.b_cholesky) / utils.th_fx(self.n_b)
+#         else:
+#             raise ValueError("Unrecognized use=" + use)
+#
+#     def cholesky_product(self, v, use="updates", right_multiply=True):
+#         assert v.ndim == 2
+#         if right_multiply:
+#             return T.dot(T.dot(self.b_cholesky.T, v), self.a_cholesky.T)
+#         else:
+#             return T.dot(T.dot(self.a_cholesky.T, v), self.b_cholesky.T)
 

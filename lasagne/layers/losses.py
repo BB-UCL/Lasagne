@@ -2,7 +2,7 @@ import theano.tensor as T
 
 from .. import utils
 from ..layers import Layer
-from ..random import normal, binary, multinomial
+from .. import random as rnd
 from ..nonlinearities import softplus, identity
 
 __all__ = [
@@ -200,9 +200,9 @@ class SquaredError(SKFGNLossLayer):
             cl_y *= weight
             return cl_x, cl_y
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
-            fake_dx = normal(x.shape)
+            fake_dx = rnd.normal(x.shape)
             fake_dx *= weight
-            fake_dy = normal(y.shape)
+            fake_dy = rnd.normal(y.shape)
             fake_dy *= weight
             return fake_dx, fake_dy
         elif optimizer.variant == "kfra":
@@ -281,7 +281,7 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
             cl_v *= weight
             return cl_v, T.zeros_like(y)
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
-            fake_dx = p_x - utils.th_fx(binary(x.shape, p=p_x))
+            fake_dx = p_x - utils.th_fx(rnd.binary(x.shape, p=p_x))
             fake_dx *= weight
             return fake_dx, T.zeros_like(y)
         elif optimizer.variant == "kfra":
@@ -368,7 +368,7 @@ class CategoricalLogitsCrossEntropy(SKFGNLossLayer):
                 cl_v = T.reshape(cl_v, x.shape)
             return cl_v, T.zeros_like(y)
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
-            fake_dx = p_x - utils.th_fx(multinomial(x.shape, pvals=p_x))
+            fake_dx = p_x - utils.th_fx(rnd.multinomial(x.shape, pvals=p_x))
             fake_dx *= T.sqrt(weight)
             if x.ndim != 2:
                 fake_dx = T.reshape(fake_dx, x.shape)
@@ -405,8 +405,10 @@ def categorical_logits_ll(output, target,
 
 class BetaCrossEntropy(SKFGNLossLayer):
     """
-    Calculates the beta cross entropy between `output`(x) and `target`(y).
-    The `output`(x) are assumed to be the logits of the Bernoulli distribution.
+    Calculates the beta cross entropy between a Beta distribution and
+    observations (these should be in the interval [0, 1]).
+
+    The `params` of the Beta distribution are assumed to be the
     Formally computes:
         - y log(sigmoid(x)) - (1 - y) * log(sigmoid(-x))
 
@@ -426,12 +428,12 @@ class BetaCrossEntropy(SKFGNLossLayer):
     y_repeats: int (default: 1)
         If `target` has to be repeated some number of times.
     """
-    def __init__(self, output, target,
+    def __init__(self, params, observations,
                  min_params=1.0,
                  nonlinearity=softplus,
                  epsilon=1e-6,
                  x_repeats=1, y_repeats=1, *args, **kwargs):
-        super(BetaCrossEntropy, self).__init__((output, target),
+        super(BetaCrossEntropy, self).__init__((params, observations),
                                                (x_repeats, y_repeats),
                                                max_inputs=2, *args, **kwargs)
         self.min_params = T.constant(min_params)
@@ -483,9 +485,14 @@ class BetaCrossEntropy(SKFGNLossLayer):
             cl_v *= weight
             return T.Lop(x_f, x, cl_v), T.zeros_like(y)
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
-            raise NotImplementedError
-            fake_dx = p_x - utils.th_fx(binary(x.shape, p=p_x))
-            fake_dx = utils.collapse_variable(fake_dx, self.repeats[0]) * T.sqrt(weight)
+            alpha = utils.expand_variable(alpha, self.repeats[0])
+            beta = utils.expand_variable(beta, self.repeats[0])
+            fake_y = rnd.beta(alpha, beta)
+            fake_y = T.clip(fake_y, self.epsilon, 1.0 - self.epsilon)
+            fake_da = T.log(fake_y) - T.psi(alpha) + T.psi(alpha + beta)
+            fake_db = T.log(1.0 - y) - T.psi(beta) + T.psi(alpha + beta)
+            fake_dx = T.concatenate((fake_da, fake_db), axis=1)
+            fake_dx *= weight
             return fake_dx, T.zeros_like(y)
         elif optimizer.variant == "kfra":
             da = T.mean(T.tri_gamma(alpha), axis=0)

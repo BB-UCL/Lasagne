@@ -96,7 +96,7 @@ def multi_sampler(sampler):
     @wraps(sampler)
     def sample(shapes, *args, **kwargs):
         # Shapes can be either a single shape or a list of shapes
-        if isinstance(shapes[0], T.TensorVariable):
+        if isinstance(shapes[0], (T.TensorVariable, theano.tensor.sharedvar.TensorSharedVariable)):
             # First entry is a symbolic expression
             if shapes[0].ndim == 0:
                 # Single shape
@@ -325,9 +325,77 @@ def matrix_normal(shape, M=None, A=None, B=None, dtype=None):
         return M + (X.dimshuffle([0, 2, 1]).dot(A.T)).dimshuffle([0, 2, 1]).dot(B)
 
 
+# def gamma1(alpha, dtype=None, alpha_0=2.5, max_samples=20):
+#     """
+#     Samples from Gamma(alpha, 1)
+#     The algorithm implemented is from:
+#     https://www.jstor.org/stable/pdf/2347200.pdf?refreqid=excelsior:95c8b191b12ab247ecd96572fb6c10bd
+#
+#     :param alpha:
+#     :param dtype:
+#     :return:
+#     """
+#     alpha_flat = T.flatten(alpha, outdim=1)
+#     shape = (alpha_flat.shape[0], max_samples)
+#     a = alpha_flat - 1
+#     b = (alpha_flat - T.inv(6 * alpha_flat)) / a
+#     c = 2 / a
+#     d = c + 2
+#     f = T.sqrt(alpha_flat)
+#     b = b.dimshuffle(0, 'x')
+#     c = c.dimshuffle(0, 'x')
+#     d = d.dimshuffle(0, 'x')
+#     f = f.dimshuffle(0, 'x')
+#     u1, u2 = uniform((shape, shape), dtype=dtype)
+#
+#     # GKM 1
+#     w = b * u1 / u2
+#     cond1 = T.le(c * u2 - d + w + T.inv(w), 0)
+#     cond2 = T.lt(c * T.log(u2) - T.log(w) + w - 1, 0)
+#     deliver_1 = T.or_(cond1, cond2)
+#
+#     # GKM 2
+#     u3 = u1 + (1 - 1.86 * u2) / f
+#     cond3 = T.and_(T.gt(u3, 0), T.lt(u3, 1))
+#     deliver_2 = T.and_(deliver_1, cond3)
+#
+#     # GKM 3
+#     deliver = T.switch(T.lt(alpha_flat, alpha_0).dimshuffle(0, 'x'),
+#                        deliver_1, deliver_2)
+#     index = T.argmax(deliver, axis=1)
+#     x = a * w[T.arange(w.shape[0]), index]
+#     return T.reshape(x, alpha.shape)
+
+
+def gamma(alpha, dtype=None, max_samples=5):
+    """
+    Samples from Gamma(alpha, 1)
+    The algorithm implemented is from:
+    http://dl.acm.org/citation.cfm?id=358414
+
+    """
+    alpha_flat = T.flatten(alpha, outdim=1)
+    shape = (alpha_flat.shape[0], max_samples)
+    d = alpha_flat - T.constant(1.0 / 3.0)
+    c = T.inv(T.sqrt(9 * d))
+    x = normal(shape, dtype=dtype)
+    v = (1 + c.dimshuffle(0, 'x') * x) ** 3
+    u = uniform(shape, dtype=dtype)
+    cond1 = T.lt(u, 1 - 0.0331 * (x ** 4))
+    cond2 = T.lt(T.log(u), 0.5 * (x ** 2) + d.dimshuffle(0, 'x') * (1 - v + T.log(v)))
+    cond3 = T.or_(cond1, cond2)
+    deliver = T.and_(T.gt(v, 0), cond3)
+    index = T.argmax(deliver, axis=1)
+    y = d * v[T.arange(alpha_flat.shape[0]), index]
+    return T.reshape(y, alpha.shape)
+
+
 def beta(alpha, beta, dtype=None):
-    raise NotImplementedError
-    dtype = dtype or theano.config.floatX
-    gamma_alpha = 2
-    gamma_beta = 2
-    return gamma_alpha / (gamma_alpha + gamma_beta)
+    """
+    Samples from a beta distribution with parameters alpha and beta of the same shape.
+    """
+    n = alpha.shape[0]
+    g = gamma(T.concatenate((alpha, beta), axis=0), dtype=dtype)
+    gamma_a = g[:n]
+    gamma_b = g[n:]
+    return gamma_a / (gamma_a + gamma_b)
