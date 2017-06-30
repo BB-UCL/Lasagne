@@ -5,6 +5,7 @@ from .. import init
 from .. import nonlinearities
 from ..utils import th_fx, fetch_pre_activation
 from ..skfgn import get_fuse_bias
+from . import helper
 
 from .base import Layer
 
@@ -81,7 +82,7 @@ class DenseLayer(Layer):
     """
     def __init__(self, incoming, num_units, W=init.GlorotUniform(),
                  b=init.Constant(0.), nonlinearity=nonlinearities.rectify,
-                 num_leading_axes=1,
+                 num_leading_axes=1, curvature_scale=1,
                  fuse_bias=None, invariant_axes=(2, 3), **kwargs):
         super(DenseLayer, self).__init__(incoming, **kwargs)
         self.nonlinearity = (nonlinearities.identity if nonlinearity is None
@@ -90,6 +91,7 @@ class DenseLayer(Layer):
         self.num_units = num_units
         self.fuse_bias = get_fuse_bias() if fuse_bias is None else fuse_bias
         self.invariant_axes = invariant_axes
+        self.curvature_scale = curvature_scale
         if num_leading_axes >= len(self.input_shape):
             raise ValueError(
                 "Got num_leading_axes=%d for a %d-dimensional input, "
@@ -190,6 +192,8 @@ class DenseLayer(Layer):
                 g = curvature * T.dot(a.T, a) / n
             else:
                 g = curvature
+            q *= self.curvature_scale
+            g *= self.curvature_scale
             make_matrix(self, g_dim, q_dim, g, q, self.get_params())
             if len(self.input_shapes[0]) > 2:
                 if self.invariant_axes != (2, 3):
@@ -206,6 +210,8 @@ class DenseLayer(Layer):
             # Propagate curvature trough the nonlinearity and calculate the activation GN
             if self.nonlinearity != nonlinearities.identity:
                 curvature = T.Lop(outputs[0], activation, curvature)
+            x *= T.sqrt(self.curvature_scale)
+            curvature *= T.sqrt(self.curvature_scale)
             make_matrix(self, g_dim, q_dim, curvature, x, self.get_params())
             return T.Lop(activation, inputs[0], curvature),
 

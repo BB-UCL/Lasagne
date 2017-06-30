@@ -62,6 +62,11 @@ def convae(arch, binary=True, nonl=tanh):
 
 
 def main(dataset="mnist", batch_size=1000, epochs=20, seed=413):
+    import lasagne.random as rand
+    alpha = theano.shared(np.asarray([1.1, 1.5, 2, 5, 10]).astype("float32"))
+    beta = theano.shared(np.asarray([1.1, 1.5, 2, 5, 10]).astype("float32"))
+    samples =rand.beta(alpha, beta)
+    f = theano.function([], samples)
     print("Data-set:", dataset)
     print("Batch size:", batch_size)
     print("Epochs:", epochs)

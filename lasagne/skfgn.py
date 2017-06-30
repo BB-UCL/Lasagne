@@ -450,22 +450,38 @@ class Optimizer(object):
         else:
             def make_matrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt, params, name=None):
                 name = name + "_" if name else ""
-                a_factor = SqrtMatrix(a_dim, a_sqrt,
-                                      layer=owning_layer, params=params,
-                                      k=0.0,
-                                      init_k=self.tikhonov_damping,
-                                      update_fn=self.curvature_avg,
-                                      name=name + "kf_a")
-                b_factor = SqrtMatrix(b_dim, b_sqrt,
-                                      layer=owning_layer, params=params,
-                                      k=0.0,
-                                      init_k=self.tikhonov_damping,
-                                      update_fn=self.curvature_avg,
-                                      name=name + "kf_b")
-                kf_mat = KroneckerFactoredMatrix((a_factor, b_factor),
-                                                 owning_layer,
-                                                 k=self.tikhonov_damping)
-                kf_matrices.append(kf_mat)
+                if a_dim is None:
+                    mat = SqrtMatrix(b_dim, b_sqrt,
+                                     layer=owning_layer, params=params,
+                                     k=0.0,
+                                     init_k=self.tikhonov_damping,
+                                     update_fn=self.curvature_avg,
+                                     name=name)
+                elif b_dim is None:
+                    mat = SqrtMatrix(a_dim, a_sqrt,
+                                     layer=owning_layer, params=params,
+                                     k=0.0,
+                                     init_k=self.tikhonov_damping,
+                                     update_fn=self.curvature_avg,
+                                     name=name)
+                else:
+                    a_factor = SqrtMatrix(a_dim, a_sqrt,
+                                          layer=owning_layer, params=params,
+                                          k=0.0,
+                                          init_k=self.tikhonov_damping,
+                                          update_fn=self.curvature_avg,
+                                          name=name + "kf_a")
+                    b_factor = SqrtMatrix(b_dim, b_sqrt,
+                                          layer=owning_layer, params=params,
+                                          k=0.0,
+                                          init_k=self.tikhonov_damping,
+                                          update_fn=self.curvature_avg,
+                                          name=name + "kf_b")
+                    mat = KroneckerFactoredMatrix((a_factor, b_factor),
+                                                  owning_layer,
+                                                  name=name,
+                                                  k=self.tikhonov_damping)
+                kf_matrices.append(mat)
 
         if self.debug:
             print("Running SKFGN with variant", self.variant)
@@ -779,10 +795,10 @@ class PositiveSemiDefiniteMatrix(object):
             raise ValueError("Unrecognized use=" + use)
 
     def get_updates(self):
-            if self.persistent is None:
-                return ()
-            else:
-                return self.persistent, self.get("updates"),
+        if self.persistent is None:
+            return ()
+        else:
+            return (self.persistent, self.update),
 
     def norm(self, norm_fn, use="updates"):
         return norm_fn(self.get(use))
@@ -792,18 +808,20 @@ class PositiveSemiDefiniteMatrix(object):
     #     transposed.transpose = not self.transpose
     #     return transposed
 
-    def linear_solve(self, v, use="updates", scale=None, k_override=None, right_multiply=True):
-        assert v.ndim == 2
+    def linear_solve(self, v_org, use="updates", scale=None, k_override=None, right_multiply=True):
+        assert v_org.ndim <= 2
         mat = self.get(use)
         mat *= scale if scale else 1
         k = k_override if k_override else self.k
         mat += T.eye(self.dim) * k
         if self.dim == 1:
-            return v / mat[0, 0]
-        elif right_multiply:
-            return utils.linear_solve(mat, v, "symmetric")
+            return v_org / mat[0, 0]
+        v = T.reshape(v_org, (-1, 1)) if v_org.ndim < 2 else v_org
+        if right_multiply:
+            solved = utils.linear_solve(mat, v, "symmetric")
         else:
-            return utils.linear_solve(mat, v.T, "symmetric").T
+            solved = utils.linear_solve(mat, v.T, "symmetric").T
+        return T.reshape(solved, v_org.shape) if v_org.ndim < 2 else solved
 
     def cholesky_product(self, v, use="updates", scale=None, k_override=None, right_multiply=True):
         assert v.ndim == 2
@@ -879,6 +897,7 @@ class KroneckerFactoredMatrix(object):
                  factors,
                  layer=None,
                  k=1e-3,
+                 name=None,
                  norm_fn=utils.mean_trace_norm):
         assert len(factors) > 1
         if len(factors) > 2:
@@ -890,10 +909,22 @@ class KroneckerFactoredMatrix(object):
         self.layer = layer
         self.dim = factors[0].dim * factors[1].dim
         self.k = k
+        self.name = name if name else ""
         self.norm_fn = norm_fn
 
     def get_updates(self):
-        return tuple(f.get_updates() for f in self.factors)
+        if len(self.factors) == 1:
+            return self.factors[0].get_updates()
+        elif len(self.factors) == 2:
+            return self.factors[0].get_updates() + self.factors[1].get_updates()
+        elif len(self.factors) == 3:
+            return self.factors[0].get_updates() + self.factors[1].get_updates() + \
+                   self.factors[2].get_updates()
+        elif len(self.factors) == 3:
+            return self.factors[0].get_updates() + self.factors[1].get_updates() + \
+                   self.factors[2].get_updates() + self.factors[3].get_updates()
+        else:
+            raise NotImplementedError
 
     def linear_solve(self, v, use="updates", scale=None, k_override=None, right_multiply=True):
         a, b = self.factors
@@ -907,11 +938,11 @@ class KroneckerFactoredMatrix(object):
             return b.linear_solve(v, use, scale, k, right_multiply)
         elif b.dim == 1:
             scale *= b.get(use)[0, 0]
-            return a.linear_solve(v, use, scale, k, right_multiply)
+            return a.linear_solve(v, use, scale, k, not right_multiply)
         else:
             omega = T.sqrt(a.norm(self.norm_fn, use) / b.norm(self.norm_fn, use))
             name = self.layer.name + "_" if self.layer else ""
-            name += "omega"
+            name += self.name + "_omega"
             add_to_report(name, omega)
             k_override = T.sqrt(k)
             a_scale = T.inv(omega)

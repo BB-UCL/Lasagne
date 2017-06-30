@@ -490,7 +490,7 @@ class BetaCrossEntropy(SKFGNLossLayer):
             fake_y = rnd.beta(alpha, beta)
             fake_y = T.clip(fake_y, self.epsilon, 1.0 - self.epsilon)
             fake_da = T.log(fake_y) - T.psi(alpha) + T.psi(alpha + beta)
-            fake_db = T.log(1.0 - y) - T.psi(beta) + T.psi(alpha + beta)
+            fake_db = T.log(1.0 - fake_y) - T.psi(beta) + T.psi(alpha + beta)
             fake_dx = T.concatenate((fake_da, fake_db), axis=1)
             fake_dx *= weight
             return fake_dx, T.zeros_like(y)
