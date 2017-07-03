@@ -934,13 +934,16 @@ class KroneckerFactoredMatrix(object):
             mat = scale * a.get(use)[0, 0] * b.get(use)[0, 0]
             return v / (mat + k)
         elif a.dim == 1:
-            scale *=  a.get(use)[0, 0]
+            scale *= a.get(use)[0, 0]
             return b.linear_solve(v, use, scale, k, right_multiply)
         elif b.dim == 1:
             scale *= b.get(use)[0, 0]
             return a.linear_solve(v, use, scale, k, not right_multiply)
         else:
-            omega = T.sqrt(a.norm(self.norm_fn, use) / b.norm(self.norm_fn, use))
+            norm_a = a.norm(self.norm_fn, use)
+            norm_b = b.norm(self.norm_fn, use)
+            omega = T.sqrt(norm_a / norm_b)
+            # relative_norm = T.sqrt(norm_a * norm_b)
             name = self.layer.name + "_" if self.layer else ""
             name += self.name + "_omega"
             add_to_report(name, omega)

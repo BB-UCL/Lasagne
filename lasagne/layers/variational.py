@@ -287,9 +287,9 @@ class GaussianKL(SKFGNLossLayer):
                 g_q *= T.sqrt(weight)
             if self.state == 1 or self.state == 3:
                 # P
-                g_p_mu = v_p_mu / T.sqr(p_sigma)
+                g_p_mu = v_p_mu / p_sigma
                 g_p_mu = utils.collapse_variable(g_p_mu, self.repeats[1])
-                g_p_sigma = 2 * v_p_sigma / T.sqr(p_sigma)
+                g_p_sigma = T.sqrt(2) * v_p_sigma / p_sigma
                 g_p_sigma = utils.collapse_variable(g_p_sigma, self.repeats[1])
                 g_p = T.concatenate((g_p_mu, g_p_sigma), axis=1)
                 g_p *= T.sqrt(weight)
@@ -311,13 +311,13 @@ class GaussianKL(SKFGNLossLayer):
             if self.state == 1 or self.state == 2:
                 # Q
                 d_q_mu = fake_q / q_sigma
-                d_q_sigma = (T.sqr(fake_q) - 1) / q_sigma
+                d_q_sigma = (1 - T.sqr(fake_q)) / q_sigma
                 d_q = T.concatenate((d_q_mu, d_q_sigma), axis=1)
                 g_q = d_q * T.sqrt(weight)
             if self.state == 1 or self.state == 3:
                 # P
                 d_p_mu = fake_p / p_sigma
-                d_p_sigma = (T.sqr(fake_p) - 1) / p_sigma
+                d_p_sigma = (1 - T.sqr(fake_p)) / p_sigma
                 d_p = T.concatenate((d_p_mu, d_p_sigma), axis=1)
                 g_p = d_p * T.sqrt(weight)
         elif optimizer.variant == "kfra":
