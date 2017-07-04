@@ -823,21 +823,22 @@ class PositiveSemiDefiniteMatrix(object):
             solved = utils.linear_solve(mat, v.T, "symmetric").T
         return T.reshape(solved, v_org.shape) if v_org.ndim < 2 else solved
 
-    def cholesky_product(self, v, use="updates", scale=None, k_override=None, right_multiply=True):
+    def cholesky_product(self, v, use="updates", scale=None, k_override=None,
+                         transpose=False, right_multiply=True):
         assert v.ndim == 2
         mat = self.get(use)
         mat *= scale if scale else 1
         k = k_override if k_override else self.k
         mat += T.eye(self.dim) * k
         if self.dim == 1:
-            return v / T.sqrt(mat[0, 0])
+            return v / T.sqrt(mat[0, 0] + k)
         cholesky = T.slinalg.cholesky(mat)
-        # if self.transpose:
-        #     cholesky = cholesky.T
+        if transpose:
+            cholesky = cholesky.T
         if right_multiply:
             return T.dot(cholesky, v)
         else:
-            return T.dot(cholesky.T, v)
+            return T.dot(v, cholesky)
 
 PSD = PositiveSemiDefiniteMatrix
 
@@ -956,6 +957,41 @@ class KroneckerFactoredMatrix(object):
             v2 = a.linear_solve(v1, use, a_scale, k_override, False)
             return v2
 
+    def cholesky_product(self, v, use="updates", scale=None, k_override=None, right_multiply=True):
+        a, b = self.factors
+        k = k_override if k_override else self.k
+        scale = scale if scale else 1
+        if a.dim == 1 and b.dim == 1:
+            mat = scale * a.get(use)[0, 0] * b.get(use)[0, 0]
+            return v * T.sqrt(mat + k)
+        elif a.dim == 1:
+            scale *= a.get(use)[0, 0]
+            v2 = b.cholesky_product(v, use, scale, k,
+                                    transpose=True,
+                                    right_multiply=right_multiply)
+        elif b.dim == 1:
+            scale *= b.get(use)[0, 0]
+            v2 = a.cholesky_product(v, use, scale, k,
+                                    transpose=False,
+                                    right_multiply=not right_multiply)
+        else:
+            norm_a = a.norm(self.norm_fn, use)
+            norm_b = b.norm(self.norm_fn, use)
+            omega = T.sqrt(norm_a / norm_b)
+            # relative_norm = T.sqrt(norm_a * norm_b)
+            # name = self.layer.name + "_" if self.layer else ""
+            # name += self.name + "_omega"
+            # add_to_report(name, omega)
+            k_override = T.sqrt(k)
+            a_scale = T.inv(omega)
+            b_scale = omega
+            if not right_multiply:
+                a, b, a_scale, b_scale = b, a, b_scale, a_scale
+            v1 = b.cholesky_product(v, use, b_scale, k_override,
+                                    transpose=True, right_multiply=True)
+            v2 = a.cholesky_product(v1, use, a_scale, k_override,
+                                    transpose=False, right_multiply=False)
+        return v2
 
 # class KroneckerFactoredMatrix(object):
 #     def __init__(self,
