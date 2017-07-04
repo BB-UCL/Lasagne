@@ -301,7 +301,7 @@ def uniform_ball(shape, radius=None, dtype=None, random=None):
 
 
 @multi_sampler
-def matrix_normal(shape, M=None, A=None, B=None, dtype=None):
+def matrix_normal(shape, M=None, A=None, B=None, dtype=None, mode="cov"):
     dtype = dtype or theano.config.floatX
     if len(shape) == 2:
         n, p = shape
@@ -319,8 +319,15 @@ def matrix_normal(shape, M=None, A=None, B=None, dtype=None):
         return X
 
     if len(shape) == 2:
-        return M + A.dot(X).dot(B)
+        if mode == "cov":
+            return M + A.dot(X).dot(B)
+        elif mode == "prec":
+            X1 = linear_solve(A, X, A_structure="upper_triangular")
+            X2 = linear_solve(B, X1.T, A_structure="lower_triangular").T
+            return M + X2
     else:
+        if mode == "prec":
+            raise NotImplemented
         M = M.dimshuffle(['x', 0, 1])
         return M + (X.dimshuffle([0, 2, 1]).dot(A.T)).dimshuffle([0, 2, 1]).dot(B)
 
