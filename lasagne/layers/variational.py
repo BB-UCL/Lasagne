@@ -259,7 +259,7 @@ class GaussianKL(SKFGNLossLayer):
 
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         assert len(curvature) == 1
-        weight = curvature[0]
+        weight = T.sqrt(curvature[0])
         g_q, g_p = None, None
         if optimizer.variant == "skfgn-rp":
             q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, True)
@@ -284,7 +284,7 @@ class GaussianKL(SKFGNLossLayer):
                 g_q_sigma = v_q_sigma * T.sqrt(T.inv(T.sqr(p_sigma)) + T.inv(T.sqr(q_sigma)))
                 g_q_sigma = utils.collapse_variable(g_q_sigma, self.repeats[0])
                 g_q = T.concatenate((g_q_mu, g_q_sigma), axis=1)
-                g_q *= T.sqrt(weight)
+                g_q *= weight
             if self.state == 1 or self.state == 3:
                 # P
                 g_p_mu = v_p_mu / p_sigma
@@ -292,7 +292,7 @@ class GaussianKL(SKFGNLossLayer):
                 g_p_sigma = T.sqrt(2) * v_p_sigma / p_sigma
                 g_p_sigma = utils.collapse_variable(g_p_sigma, self.repeats[1])
                 g_p = T.concatenate((g_p_mu, g_p_sigma), axis=1)
-                g_p *= T.sqrt(weight)
+                g_p *= weight
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
             q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, False)
             # Samples
@@ -313,13 +313,13 @@ class GaussianKL(SKFGNLossLayer):
                 d_q_mu = fake_q / q_sigma
                 d_q_sigma = (1 - T.sqr(fake_q)) / q_sigma
                 d_q = T.concatenate((d_q_mu, d_q_sigma), axis=1)
-                g_q = d_q * T.sqrt(weight)
+                g_q = d_q * weight
             if self.state == 1 or self.state == 3:
                 # P
                 d_p_mu = fake_p / p_sigma
                 d_p_sigma = (1 - T.sqr(fake_p)) / p_sigma
                 d_p = T.concatenate((d_p_mu, d_p_sigma), axis=1)
-                g_p = d_p * T.sqrt(weight)
+                g_p = d_p * weight
         elif optimizer.variant == "kfra":
             q_mu, q_sigma, p_mu, p_sigma = self.extract_q_p(inputs, True)
             if self.state == 1 or self.state == 2:
@@ -330,13 +330,13 @@ class GaussianKL(SKFGNLossLayer):
                     g_q_mu = T.ones(q_sigma.shape[1:])
                 g_q_sigma = T.mean(T.inv(T.sqr(p_sigma)) + T.inv(T.sqr(q_sigma)), axis=0)
                 g_q = T.diag(T.concatenate((g_q_mu, g_q_sigma), axis=0))
-                g_q *= weight
+                g_q *= weight**2
             if self.state == 1 or self.state == 3:
                 # P
                 g_p_mu = T.mean(T.inv(p_sigma), axis=0)
                 g_p_sigma = 2 * g_p_mu
                 g_p = T.diag(T.concatenate((g_p_mu, g_p_sigma), axis=0))
-                g_p *= weight
+                g_p *= weight**2
         else:
             raise ValueError("Unreachable!")
         if self.state == 1:

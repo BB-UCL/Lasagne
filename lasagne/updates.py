@@ -82,6 +82,7 @@ __all__ = [
     "adam",
     "adamax",
     "cocob",
+    "yellow_fin",
     "norm_constraint",
     "total_norm_constraint",
     "apply_decay",
@@ -799,6 +800,101 @@ def cocob(loss_or_grads, params, alpha=1000, epsilon=1e-9, use_sigmoid=False):
         #     factor /= (l_t + epsilon)
         updates[param] = param - factor * (l_t + r_t)
     return updates
+
+
+def yellow_fin(loss_or_grads, params, beta=0.9,
+               learning_rate_init=0.01, momentum_init=0.0,
+               t=None, window_width=20, debug=False):
+    grads = get_or_compute_grads(loss_or_grads, params)
+    updates = OrderedDict()
+
+    alpha = theano.shared(utils.floatX(np.asarray(learning_rate_init)), name="learning_rate")
+    mu = theano.shared(utils.floatX(np.asarray(momentum_init)), name="momentum")
+    if t is None:
+        t = theano.shared(np.asarray(0).astype(np.int32), name="t")
+        updates[t] = t + 1
+
+    h_max, h_min = curvature_range(grads, beta, t, updates, window_width)
+    c = gradient_variance(grads, params, beta, updates)
+    d = distance_to_optim(grads, beta, updates)
+    if debug:
+        h_max = utils.theano_print_values(h_max, "h_max")
+        h_min = utils.theano_print_values(h_min, "h_min")
+        c = utils.theano_print_values(c, "c")
+        d = utils.theano_print_values(d, "d")
+    # We have the equation x^2 D^2 + (1-x)^4 * C / h_min^2
+    # where x = sqrt(mu)
+    # Minimising this reduces to solving
+    # y^3 + p * y + p = 0
+    # y = x - 1
+    # p = (D^2 h_min^2)/(2 * C)
+    p = (T.sqr(d) * T.sqr(h_min)) / (2 * c)
+    # root for w^3
+    w3 = p * (T.sqrt(0.25 + p / 27.0) - 0.5)
+    if debug:
+        p = utils.theano_print_values(p, "p")
+        w3 = utils.theano_print_values(w3, "w3")
+    w = T.power(w3, 1.0 / 3.0)
+    y = w - p / (3 * w)
+    mu_sqrt1 = y + 1
+    if debug:
+        mu_sqrt1 = utils.theano_print_values(mu_sqrt1, "mu_sqrt1")
+    mu_sqrt2 = (T.sqrt(h_max) - T.sqrt(h_min)) / (T.sqrt(h_max) + T.sqrt(h_min))
+    mu_sqrt = T.maximum(mu_sqrt1, mu_sqrt2)
+    alpha_t = T.sqr(1 - mu_sqrt) / h_min
+    mu_t = T.sqr(mu_sqrt)
+    # mu_t = utils.theano_print_values(mu_t, "mu_t")
+    # alpha_t = utils.theano_print_values(alpha_t, "alpha_t")
+    updates[mu] = ema(beta, mu, mu_t)
+    updates[alpha] = ema(beta, alpha, alpha_t)
+    # apply momentum
+    updates.update(momentum(grads, params, updates[alpha], updates[mu]))
+    return updates
+
+
+def curvature_range(grads, beta, t, updates, window_width=20, debug=False):
+    # Update the window
+    window = theano.shared(T.zeros((window_width, )).eval(), name="window")
+    t_mod = T.mod_check(t, window_width)
+    updates[window] = T.set_subtensor(window[t_mod], sum(T.sum(T.sqr(g)) for g in grads))
+    if debug:
+        updates[window] = utils.theano_print_values(updates[window], "window")
+    # Get the h_max_t and h_min_t
+    t = T.minimum(t + 1, window_width)
+    h_max_t = T.max(updates[window][:t])
+    h_min_t = T.min(updates[window][:t])
+    # Update the moving averages
+    h_max = theano.shared(utils.floatX(np.asarray(0.0)), name="h_max")
+    h_min = theano.shared(utils.floatX(np.asarray(0.0)), name="h_min")
+    updates[h_max] = ema(beta, h_max, h_max_t)
+    updates[h_min] = ema(beta, h_min, h_min_t)
+    return updates[h_max], updates[h_min]
+
+
+def gradient_variance(grads, params, beta, updates):
+    norm = 0
+    for p, g in zip(params, grads):
+        value = p.get_value()
+        mom1 = theano.shared(np.zeros(value.shape, dtype=value.dtype),
+                             broadcastable=p.broadcastable)
+        mom2 = theano.shared(np.zeros(value.shape, dtype=value.dtype),
+                             broadcastable=p.broadcastable)
+
+        updates[mom1] = ema(beta, mom1, g)
+        updates[mom2] = ema(beta, mom2, T.sqr(g))
+        norm += T.sum(T.abs_(updates[mom2] - T.sqr(updates[mom1])))
+    return norm
+
+
+def distance_to_optim(grads, beta, updates):
+    g = theano.shared(utils.floatX(np.asarray(1.0)), name="g")
+    h = theano.shared(utils.floatX(np.asarray(1.0)), name="h")
+    d = theano.shared(utils.floatX(np.asarray(1.0)), name="d")
+    new_norm = sum(T.sum(T.sqr(g)) for g in grads)
+    updates[g] = ema(beta, g, T.sqrt(new_norm))
+    updates[h] = ema(beta, h, new_norm)
+    updates[d] = ema(beta, d, updates[g] / updates[h])
+    return updates[d]
 
 
 def norm_constraint(tensor_var, max_norm, norm_axes=None, epsilon=1e-7):

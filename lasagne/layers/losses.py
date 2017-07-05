@@ -138,6 +138,7 @@ class SumLosses(SKFGNLossLayer):
             return (),
 
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
+        # TODO For now we care only about positive curvature
         return [T.abs_(T.constant(w)) for w in self.weights]
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
@@ -194,11 +195,11 @@ class SquaredError(SKFGNLossLayer):
         assert len(curvature) == 1
         weight = T.sqrt(curvature[0])
         if optimizer.variant == "skfgn-rp":
-            cl_x = optimizer.random_sampler(x.shape)
-            cl_x *= weight
-            cl_y = optimizer.random_sampler(y.shape)
-            cl_y *= weight
-            return cl_x, cl_y
+            v_x = optimizer.random_sampler(x.shape)
+            v_x *= weight
+            v_y = optimizer.random_sampler(y.shape)
+            v_y *= weight
+            return v_x, v_y
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
             fake_dx = rnd.normal(x.shape)
             fake_dx *= weight
@@ -213,9 +214,9 @@ class SquaredError(SKFGNLossLayer):
                 x = T.flatten(x, outdim=2)
                 y = T.flatten(y, outdim=2)
                 gn_x = T.eye(x.shape[1])
-                gn_x *= curvature[0]
+                gn_x *= weight**2
                 gn_y = T.eye(y.shape[1])
-                gn_y *= curvature[0]
+                gn_y *= weight**2
             else:
                 raise ValueError("KFRA can not work on more than 2 dimensions.")
             return gn_x, gn_y
@@ -273,23 +274,25 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         x, y = inputs
         assert len(curvature) == 1
-        weight = T.sqrt(curvature[0])
         p_x = T.nnet.sigmoid(x)
+        # hess = p_x * (1 - p_x)
+        hess = T.sqr(T.inv(T.exp(x / 2) + T.exp(- x / 2)))
+        weight = T.sqrt(curvature[0])
         if optimizer.variant == "skfgn-rp":
             v = optimizer.random_sampler(x.shape)
-            cl_v = T.sqrt(p_x * (1 - p_x)) * v
+            cl_v = T.sqrt(hess) * v
             cl_v *= weight
-            return cl_v, T.zeros_like(y)
+            return cl_v, T.constant(0)
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
             fake_dx = p_x - utils.th_fx(rnd.binary(x.shape, p=p_x))
             fake_dx *= weight
-            return fake_dx, T.zeros_like(y)
+            return fake_dx, T.constant(0)
         elif optimizer.variant == "kfra":
             if x.ndim == 1:
-                gn_x = T.diag(p_x * (1 - p_x))
+                gn_x = T.diag(hess)
             else:
                 p_x = T.flatten(p_x, outdim=2)
-                gn_x = T.diag(T.mean(p_x * (1 - p_x), axis=0))
+                gn_x = T.diag(T.mean(hess, axis=0))
             gn_x *= weight**2
             return gn_x, T.constant(0)
         else:
@@ -297,8 +300,9 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
         x, y = inputs_map[self]
-        sigmoid = T.nnet.sigmoid(x)
-        hess = sigmoid * (1 - sigmoid)
+        p_x = T.nnet.sigmoid(x)
+        # hess = p_x * (1 - p_x)
+        hess = T.sqr(T.inv(T.exp(x / 2) + T.exp(- x / 2)))
         return utils.gauss_newton_product(x, hess, params, v1, v2)
 
 

@@ -113,26 +113,22 @@ def multi_sampler(sampler):
         else:
             raise ValueError("Incorrect shapes input - {}".format(shapes))
         # Code for multiple shapes
+        flat_shapes = []
         for s in shapes:
             if isinstance(s, (list, tuple, np.ndarray)):
                 assert ndim == len(s)
             else:
                 assert ndim == get_symbolic_shape_ndim(s)
-        n = sum(s[0] for s in shapes)
-        if ndim == 1:
-            all_shape = (n, )
-        elif ndim == 2:
-            all_shape = (n, shapes[0][1])
-        elif ndim == 3:
-            all_shape = (n, shapes[0][1], shapes[0][2])
-        else:
-            all_shape = (n, shapes[0][1], shapes[0][2], shapes[0][3])
-        samples = sampler(all_shape, *args, **kwargs)
+            flat = 1
+            for d in range(ndim):
+                flat *= s[d]
+            flat_shapes.append(flat)
+        samples = sampler((sum(flat_shapes), ), *args, **kwargs)
         n = 0
         split = []
-        for s in shapes:
-            split.append(samples[n:n + s[0]])
-            n += s[0]
+        for s, f in zip(shapes, flat_shapes):
+            split.append(T.reshape(samples[n:n + f], s))
+            n += f
         return split
     return sample
 
