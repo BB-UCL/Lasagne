@@ -307,8 +307,9 @@ class RecurrenceLayer(Layer):
 
         # Correct order
         if self.out_order == "NTD" and not self.only_return_final:
-            outputs = tuple(o.dimshuffle(*((1, 0) + tuple(range(2, o.ndim))))
+            outputs = (o.dimshuffle(*((1, 0) + tuple(range(2, o.ndim))))
                             for o in outputs)
+        outputs = tuple(outputs)
         # Apply the hid_to_out layer if exists
         layer = self.inner_layers.get("hid_to_out", None)
         if layer:
@@ -417,7 +418,7 @@ class RNNLayer(RecurrenceLayer):
             l_in = ConcatLayer(inputs, axis=1, name="in_concat")
         else:
             # Single input
-            l_in = InputLayer(shapes[0])
+            l_in = InputLayer(shapes[0], name="fake_in")
         if step_layer.pre_compute_input or not step_layer.combine_h_x:
             # Dense Wx layer
             l_in = DenseLayer(incoming=l_in,

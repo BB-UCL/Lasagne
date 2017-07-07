@@ -315,16 +315,17 @@ class Optimizer(object):
         else:
             steps = initial_steps
 
+        if self.clipping is not None:
+            if self.debug:
+                print("Applying clipping.")
+            steps = self.clipping(steps, grads)
+
         # Apply clipping
         grad_norm = T.sqrt(sum(T.sum(T.sqr(g)) for g in grads))
         step_norm = T.sqrt(sum(T.sum(T.sqr(s)) for s in steps))
         mixed_norm = T.sqrt(sum(T.sum(s * g) for s, g in zip(steps, grads)))
         norms = T.stack((grad_norm, step_norm, mixed_norm))
         add_to_report("skfgn::norms", norms)
-        if self.clipping is not None:
-            if self.debug:
-                print("Applying clipping.")
-            steps = self.clipping(steps, grads)
 
         # Generate final updates
         updates = self.update_function(steps, params, self.learning_rate)
@@ -554,7 +555,9 @@ class Optimizer(object):
             v = sum(T.sum(d * g) for d, g in zip(steps1, grads))
             G = gauss_newton_product(steps1)
             kI = sum(T.sum(T.sqr(d)) for d in steps1) * self.tikhonov_damping
-            M = G + kI
+            # gg = gauss_newton_product(steps1, grads)
+            # gg = utils.theano_print_values(gg, "gg")
+            M = G + kI #+ 1e-20 * gg
             # M = theano_print_vals(M, "M")
             alpha = v / M
             reduction = alpha * v / 2.0
@@ -698,14 +701,15 @@ def optimizer_from_dict(primitive_dict):
 
     if primitive_dict.get("clipping") is not None:
         name = primitive_dict["clipping"]
+        max_norm = primitive_dict.pop("clipping_norm")
         if name == "gauss-newton":
-            def clipping(steps, grads, max_norm):
+            def clipping(steps, grads):
                 return upd.total_norm_constraint(steps, max_norm, grads)
         elif name == "norm":
-            def clipping(steps, grads, max_norm):
+            def clipping(steps, grads):
                 return upd.total_norm_constraint(steps, max_norm)
         elif name == "box":
-            def clipping(steps, grads, max_norm):
+            def clipping(steps, grads):
                 return T.clip(steps, min=-max_norm, max=max_norm)
         else:
             raise ValueError("Unrecognized 'clipping'=", name)
