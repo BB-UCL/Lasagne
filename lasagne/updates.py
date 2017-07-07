@@ -1033,9 +1033,10 @@ def total_norm_constraint(tensor_vars, max_norm, target_vars=None, return_norm=F
     """
     if target_vars is None:
         norm = T.sqrt(sum(T.sum(tensor**2) for tensor in tensor_vars))
+        multiplier = T.minimum(T.constant(1), max_norm / norm)
     else:
         norm = T.sqrt(sum(T.sum(tensor * target) for tensor, target in zip(tensor_vars, target_vars)))
-    multiplier = T.minimum(T.constant(1), max_norm / norm)
+        multiplier = T.minimum(T.constant(1), T.sqr(max_norm / norm))
     tensor_vars_scaled = [step*multiplier for step in tensor_vars]
 
     if return_norm:
