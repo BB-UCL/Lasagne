@@ -15,7 +15,8 @@ __all__ = [
     "dimshuffle",
     "PadLayer",
     "pad",
-    "SliceLayer"
+    "SliceLayer",
+    "ReverseLayer"
 ]
 
 
@@ -411,3 +412,22 @@ class SliceLayer(Layer):
         if axis < 0:
             axis += x.ndim
         return x[(slice(None),) * axis + (self.slice,)],
+
+
+class ReverseLayer(Layer):
+    def __init__(self, incoming, axis=0, **kwargs):
+        super(ReverseLayer, self).__init__(incoming, **kwargs)
+        self.axis = axis
+
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
+        if self.axis == 0:
+            return x[::-1],
+        elif self.axis == 1:
+            return x[:, ::-1],
+        elif self.axis == 2:
+            return x[:, :, ::-1],
+        elif self.axis == 3:
+            return x[:, :, :, ::-1],
+        else:
+            raise NotImplementedError

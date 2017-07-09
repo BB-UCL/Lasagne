@@ -81,7 +81,7 @@ class RecurrenceLayer(Layer):
     """
     lasagne.layers.recurrent.RecurrenceLayer(incoming, step_layer,
     in_to_hid=None, hid_to_out=None, mask_input=None, pre_compute_input=True,
-    pass_raw_and_computed=False, in_order="TND", out_order="TND",
+    in_order="TND", out_order="TND",
     backwards=False, gradient_steps=-1, only_return_final=False,
     unroll_scan=False, **kwargs)
 
@@ -128,9 +128,9 @@ class RecurrenceLayer(Layer):
         the sequence. This can result in a speedup at the expense of
         an increase in memory usage.
 
-    pass_raw_and_computed: bool
-        If True will pass to the raw input and the computed one from the
-        `in_to_hid`, otherwise only the computed one.
+    # pass_raw_and_computed: bool
+    #     If True will pass to the raw input and the computed one from the
+    #     `in_to_hid`, otherwise only the computed one.
 
     in_order : "TND" or "NTD"
         Defines what is the ordering of the inputs. Note that if there are
@@ -167,11 +167,12 @@ class RecurrenceLayer(Layer):
     def __init__(self,
                  incoming,
                  step_layer,
+                 backward_layer=None,
                  in_to_hid=None,
                  hid_to_out=None,
                  mask_input=None,
                  pre_compute_input=True,
-                 pass_raw_and_computed=False,
+                 # pass_raw_and_computed=False,
                  in_order="TND",
                  out_order="TND",
                  backwards=False,
@@ -187,15 +188,19 @@ class RecurrenceLayer(Layer):
             # Single layer
             incoming = (incoming,)
         if mask_input is not None:
-            incoming += (mask_input, )
-        inner = {"step": step_layer}
+            incoming = (mask_input, ) + incoming
+        if backward_layer is not None:
+            inner = {"step_forward": step_layer, "step_backward": backward_layer}
+        else:
+            inner = {"step": step_layer}
         if in_to_hid is not None:
             inner["in_to_hid"] = in_to_hid
         if hid_to_out is not None:
             inner["hid_to_out"] = hid_to_out
         self.mask = mask_input is not None
+        self.bidirectional = backward_layer is not None
         self.pre_compute_input = pre_compute_input
-        self.pass_raw_and_computed = pass_raw_and_computed
+        # self.pass_raw_and_computed = pass_raw_and_computed
         self.in_order = in_order
         self.out_order = out_order
         self.backwards = backwards
@@ -218,12 +223,21 @@ class RecurrenceLayer(Layer):
 
     def get_output_shapes_for(self, input_shapes):
         if self.mask:
-            input_shapes = input_shapes[:-1]
+            input_shapes = input_shapes[1:]
         shapes = self.get_loop_shapes(input_shapes)
         if self.inner_layers.get("in_to_hid") is not None:
             shapes = self.inner_layers["in_to_hid"] \
                 .get_output_shapes_for(shapes)
-        shapes = self.inner_layers["step"].get_output_shapes_for(shapes)
+        if self.inner_layers.get("step_backward"):
+            shapes1 = self.inner_layers["step_forward"].get_output_shapes_for(shapes)
+            shapes2 = self.inner_layers["step_backward"].get_output_shapes_for(shapes)
+            shapes = list()
+            for s1, s2 in zip(shapes1, shapes2):
+                assert len(s1) == len(s2)
+                shapes.append(tuple(ss for ss in s1[:-1]) + (s1[-1] + s2[-1], ))
+            shapes = tuple(shapes)
+        else:
+            shapes = self.inner_layers["step"].get_output_shapes_for(shapes)
         if self.inner_layers.get("hid_to_out") is not None:
             shapes = self.inner_layers["hid_to_out"] \
                 .get_output_shapes_for(shapes)
@@ -232,44 +246,130 @@ class RecurrenceLayer(Layer):
             shapes = tuple((s[1], s[0]) + s[2:] for s in shapes)
         return shapes
 
-    def get_outputs_for(self, inputs, **kwargs):
+    def v1(self, inputs, **kwargs):
         if self.in_order == "NTD":
             inputs = tuple(i.dimshuffle(*((1, 0) + tuple(range(2, i.ndim))))
                            for i in inputs)
+        # If there is a mask its the first input so pull it out
+        if self.mask:
+            raw_inputs = inputs[1:]
+        else:
+            raw_inputs = inputs
 
-        raw_inputs = inputs
+        if self.bidirectional:
+            # If this is a bi-directional RNN first prepare the inputs correctly
+            # Reverse than concatenate
+            raw_inputs = raw_inputs + tuple(i[::-1] for i in raw_inputs)
+            if self.mask:
+                masks = (inputs[0], inputs[0][::-1])
+            else:
+                masks = ()
+        elif self.mask:
+            masks = inputs[:1]
+        else:
+            masks = ()
+
         if self.pre_compute_input:
             layer = self.inner_layers["in_to_hid"]
-            t_ns = tuple((i.shape[0], i.shape[1]) for i in inputs)
-            inputs = (T.reshape(i, (t1 * t2, -1))
-                      for i, (t1, t2) in zip(inputs, t_ns))
+            # The t x n dimensions of each input
+            t_ns = tuple((i.shape[0], i.shape[1]) for i in raw_inputs)
+            # Reshape all of them to t*n x d
+            next_inputs = tuple(T.reshape(i, (t * n, -1))
+                                for i, (t, n) in zip(raw_inputs, t_ns))
+            if self.bidirectional:
+                n = len(next_inputs) // 2
+                next_inputs = tuple(T.concatenate((i1, i2), axis=1) for i1, i2 in zip(next_inputs[:n], next_inputs[n:]))
+            # Map each to an input layer
             input_layers = (l for l in helper.get_all_layers(layer)
                             if isinstance(l, InputLayer))
-            inputs = helper.get_outputs(layer,  dict(zip(input_layers,
-                                                         inputs)))
-            inputs = tuple(T.reshape(i, (t1, t2, -1))
-                           for i, (t1, t2) in zip(inputs, t_ns))
+            # Pass them trough the layer
+            next_inputs = helper.get_outputs(layer,  dict(zip(input_layers,
+                                                              next_inputs)))
+            # Reshape back to t x n x d
+            next_inputs = tuple(T.reshape(i, (t, n, -1))
+                                for i, (t, n) in zip(next_inputs, t_ns))
+            if self.bidirectional:
+                d1 = self.inner_layers["step_forward"].num_x_to_h
+                i1 = (i[:, :, :d1] for i in next_inputs)
+                i2 = (i[:, :, d1:] for i in next_inputs)
+                next_inputs = tuple(i1) + tuple(i2)
+        else:
+            # If we don't pre-compute the inputs just leave it as is
+            next_inputs = raw_inputs
 
-        if self.pass_raw_and_computed:
-            inputs = raw_inputs + inputs
-        ns = tuple(i.shape[1] for i in inputs)
-        step_l = self.inner_layers["step"]
+        # if self.pass_raw_and_computed:
+        #     inputs = raw_inputs + inputs
+
+        # All of the batch sizes for each input
+        ns = tuple(i.shape[1] for i in next_inputs)
+
+        # Prepare initializers
+        if self.bidirectional:
+            inits1 = self.inner_layers["step_forward"].get_inits(ns)
+            inits2 = self.inner_layers["step_backward"].get_inits(ns)
+            inits = tuple(inits1) + tuple(inits2)
+
+        else:
+            inits = self.inner_layers["step"].get_inits(ns)
+
+        def get_step_output(*args, **kwargs):
+            np = len(self.get_params())
+            if self.bidirectional:
+                # Split all the inputs
+                f_x = args[0]
+                b_x = args[1]
+                args = args[2:-np]
+                np = len(args) // 2
+                f_args = (f_x, ) + args[:np]
+                b_args = (b_x, ) + args[np:]
+                f_out = self.inner_layers["step_forward"].get_outputs_for(f_args, **kwargs)
+                b_out = self.inner_layers["step_backward"].get_outputs_for(b_args, **kwargs)
+                return tuple(f_out) + tuple(b_out)
+            else:
+                return self.inner_layers["step"].get_outputs_for(args[:-np], **kwargs)
 
         def step(*args):
+            # Number of inputs
+            n = len(self.input_shapes)
+            # If we have a mask take it out as first input
+            if self.mask:
+                if self.bidirectional:
+                    mask = (args[0].dimshuffle(0, 'x'), ars[1].dimshuffle(0, 'x'))
+                    args = args[2:]
+                else:
+                    mask = args[0].dimshuffle(0, 'x')
+                    args = args[1:]
+                n -= 2
             if self.pre_compute_input:
-                return step_l.get_outputs_for(args, **kwargs)
+                # Directly compute the step output
+                step_out = get_step_output(*args, **kwargs)
             else:
-                n = len(self.input_shapes)
-                raw_inputs = args[:n] if self.pass_raw_and_computed else ()
-                s1n = n if self.pass_raw_and_computed else 0
-                s2n = 2*n if self.pass_raw_and_computed else n
-                layer = self.inner_layers["in_to_hid"]
-                input_layers = (l for l in helper.get_all_layers(layer)
-                                if isinstance(l, InputLayer))
-                inputs = helper.get_outputs(layer, dict(zip(input_layers,
-                                                            args[s1n:s2n])))
-                args = raw_inputs + inputs + args[s2n:]
-                return step_l.get_outputs_for(args, **kwargs)
+                # Pass the inputs trough the in_to_hid
+                in_to_hid = self.inner_layers["in_to_hid"]
+                layers = (l for l in helper.get_all_layers(in_to_hid)
+                          if isinstance(l, InputLayer))
+                step_inputs = helper.get_outputs(in_to_hid, dict(zip(layers, args[:n])))
+                # Combine them together with the rest of the args
+                computed = step_inputs + args[n:]
+                # Compute the step output
+                step_out = get_step_output(computed, **kwargs)
+            if self.mask:
+                # If there is a mask get the old outputs
+                l = len(step_out)
+                old_outputs = args[n:n+l]
+                # Apply the mask
+                outs = tuple(mask * o + (1 - mask) * old_o for o, old_o in zip(step_out, old_outputs))
+                if self.inner_layers.get("step_backward") is not None:
+                    # convert N x 2 x D to N x 2D
+                    return (T.reshape(o, (o.shape[0], -1)) for o in outs)
+                else:
+                    return outs
+            else:
+                # Directly return
+                return step_out
+        # The inputs are the masks plus
+        inputs = masks + next_inputs
+        # Scan
         if self.unroll_scan:
             if self.gradient_steps != -1:
                 raise ValueError("unroll_scan does not support "
@@ -281,7 +381,7 @@ class RecurrenceLayer(Layer):
             outputs = utils.unroll_scan(
                 fn=step,
                 sequences=inputs,
-                outputs_info=step_l.get_inits(ns),
+                outputs_info=inits,
                 non_sequences=self.get_params(),
                 go_backwards=self.backwards,
                 n_steps=n_steps)
@@ -289,12 +389,17 @@ class RecurrenceLayer(Layer):
             outputs, _ = theano.scan(
                 fn=step,
                 sequences=inputs,
-                outputs_info=step_l.get_inits(ns),
+                outputs_info=inits,
                 non_sequences=self.get_params(),
                 go_backwards=self.backwards,
                 truncate_gradient=self.gradient_steps,
                 return_list=True,
                 strict=True)
+
+        if self.bidirectional:
+            # If this is a bi-directional RNN revert back the representation
+            n = len(outputs) // 2
+            outputs = (T.concatenate((o1, o2[::-1]), axis=2) for o1, o2 in zip(outputs[:n], outputs[n:]))
 
         # If backwards reverse and if only_return_final index
         if self.backwards:
@@ -308,7 +413,181 @@ class RecurrenceLayer(Layer):
         # Correct order
         if self.out_order == "NTD" and not self.only_return_final:
             outputs = (o.dimshuffle(*((1, 0) + tuple(range(2, o.ndim))))
-                            for o in outputs)
+                       for o in outputs)
+        outputs = tuple(outputs)
+        # Apply the hid_to_out layer if exists
+        layer = self.inner_layers.get("hid_to_out", None)
+        if layer:
+            output_layers = (l for l in helper.get_all_layers(layer)
+                             if isinstance(l, InputLayer))
+            outputs = helper.get_outputs(layer, dict(zip(output_layers,
+                                                         outputs)))
+        return outputs
+
+    def get_outputs_for(self, inputs, **kwargs):
+        return self.v1(inputs, **kwargs)
+        if self.in_order == "NTD":
+            inputs = tuple(i.dimshuffle(*((1, 0) + tuple(range(2, i.ndim))))
+                           for i in inputs)
+        # If there is a mask its the first input so pull it out
+        if self.mask:
+            raw_inputs = inputs[1:]
+        else:
+            raw_inputs = inputs
+
+        if self.bidirectional:
+            # If this is a bi-directional RNN first prepare the inputs correctly
+            # Reverse than concatenate
+            raw_inputs = tuple(T.concatenate((i, i[::-1]), axis=-1) for i in raw_inputs)
+            if self.mask:
+                # TODO
+                masks = (T.concatenate((inputs[0], inputs[0][::-1]), axis=-1), )
+            else:
+                masks = ()
+        elif self.mask:
+            masks = inputs[:1]
+        else:
+            masks = ()
+
+        if self.pre_compute_input:
+            layer = self.inner_layers["in_to_hid"]
+            # The t x n dimensions of each input
+            t_ns = tuple((i.shape[0], i.shape[1]) for i in raw_inputs)
+            # Reshape all of them to t*n x d
+            next_inputs = (T.reshape(i, (t * n, -1))
+                           for i, (t, n) in zip(raw_inputs, t_ns))
+            # Map each to an input layer
+            input_layers = (l for l in helper.get_all_layers(layer)
+                            if isinstance(l, InputLayer))
+            # Pass them trough the layer
+            next_inputs = helper.get_outputs(layer,  dict(zip(input_layers,
+                                                              next_inputs)))
+            # Reshape back to t x n x d
+            next_inputs = tuple(T.reshape(i, (t, n, -1))
+                                for i, (t, n) in zip(next_inputs, t_ns))
+        else:
+            # If we don't pre-compute the inputs just leave it as is
+            next_inputs = raw_inputs
+
+        # if self.pass_raw_and_computed:
+        #     inputs = raw_inputs + inputs
+
+        # All of the batch sizes for each input
+        ns = tuple(i.shape[1] for i in next_inputs)
+
+        # Prepare initializers
+        if self.inner_layers.get("step_backward") is not None:
+            inits1 = self.inner_layers["step_forward"].get_inits(ns)
+            inits2 = self.inner_layers["step_backward"].get_inits(ns)
+            inits = tuple(T.concatenate((i1, i2), axis=1) for i1, i2 in zip(inits1, inits2))
+
+        else:
+            inits = self.inner_layers["step"].get_inits(ns)
+
+        def get_step_output(*args, **kwargs):
+            np = len(self.get_params())
+            if self.inner_layers.get("step_backward") is not None:
+                if self.pre_compute_input:
+                    dx = self.inner_layers["step_forward"].num_x_to_h
+                else:
+                    dx = self.input_shapes[0][-1]
+                d = self.inner_layers["step_forward"].h_dim
+                # Split all the inputs
+                f_x = args[0][:, :dx]
+                b_x = args[0][:, dx:]
+                f_args = (f_x, ) + tuple(i[:, :d] for i in args[1:-np])
+                b_args = (b_x, ) + tuple(i[:, d:] for i in args[1:-np])
+                f_out = self.inner_layers["step_forward"].get_outputs_for(f_args, **kwargs)
+                b_out = self.inner_layers["step_backward"].get_outputs_for(b_args, **kwargs)
+                return tuple(T.concatenate((f, b), axis=1) for (f, b) in zip(f_out, b_out))
+            else:
+                return self.inner_layers["step"].get_outputs_for(args[:-np], **kwargs)
+
+        def step(*args):
+            # Number of inputs
+            n = len(self.input_shapes)
+            # If we have a mask take it out as first input
+            if self.mask:
+                if self.inner_layers.get("step_backward") is not None:
+                    mask = T.reshape(args[0], (-1, 2)).dimshuffle(0, 1, 'x')
+                else:
+                    mask = args[0].dimshuffle(0, 'x')
+                args = args[1:]
+                n -= 1
+            if self.pre_compute_input:
+                # Directly compute the step output
+                step_out = get_step_output(*args, **kwargs)
+            else:
+                # Pass the inputs trough the in_to_hid
+                in_to_hid = self.inner_layers["in_to_hid"]
+                layers = (l for l in helper.get_all_layers(in_to_hid)
+                              if isinstance(l, InputLayer))
+                step_inputs = helper.get_outputs(in_to_hid, dict(zip(layers, args[:n])))
+                # Combine them together with the rest of the args
+                computed = step_inputs + args[n:]
+                # Compute the step output
+                step_out = get_step_output(computed, **kwargs)
+            if self.mask:
+                # If there is a mask get the old outputs
+                l = len(step_out)
+                old_outputs = args[n:n+l]
+                # Apply the mask
+                outs = tuple(mask * o + (1 - mask) * old_o for o, old_o in zip(step_out, old_outputs))
+                if self.inner_layers.get("step_backward") is not None:
+                    # convert N x 2 x D to N x 2D
+                    return (T.reshape(o, (o.shape[0], -1)) for o in outs)
+                else:
+                    return outs
+            else:
+                # Directly return
+                return step_out
+        # The inputs are the masks plus
+        inputs = masks + next_inputs
+        # Scan
+        if self.unroll_scan:
+            if self.gradient_steps != -1:
+                raise ValueError("unroll_scan does not support "
+                                 "truncating gradient")
+            if self.in_order == "TND":
+                n_steps = self.input_shapes[0][0]
+            else:
+                n_steps = self.input_shapes[0][1]
+            outputs = utils.unroll_scan(
+                fn=step,
+                sequences=inputs,
+                outputs_info=inits,
+                non_sequences=self.get_params(),
+                go_backwards=self.backwards,
+                n_steps=n_steps)
+        else:
+            outputs, _ = theano.scan(
+                fn=step,
+                sequences=inputs,
+                outputs_info=inits,
+                non_sequences=self.get_params(),
+                go_backwards=self.backwards,
+                truncate_gradient=self.gradient_steps,
+                return_list=True,
+                strict=True)
+
+        if self.inner_layers.get("step_backward") is not None:
+            # If this is a bi-directional RNN revert back the representation
+            d = self.inner_layers["step_forward"].h_dim
+            outputs = (T.concatenate((out[:, :, :d], out[:, :, d:][::-1]), axis=2) for out in outputs)
+
+        # If backwards reverse and if only_return_final index
+        if self.backwards:
+            if self.only_return_final:
+                outputs = (o[0] for o in outputs)
+            else:
+                outputs = (o[::-1] for o in outputs)
+        elif self.only_return_final:
+            outputs = (o[-1] for o in outputs)
+
+        # Correct order
+        if self.out_order == "NTD" and not self.only_return_final:
+            outputs = (o.dimshuffle(*((1, 0) + tuple(range(2, o.ndim))))
+                       for o in outputs)
         outputs = tuple(outputs)
         # Apply the hid_to_out layer if exists
         layer = self.inner_layers.get("hid_to_out", None)
@@ -404,6 +683,7 @@ class RNNLayer(RecurrenceLayer):
     def __init__(self,
                  incoming,
                  step_layer,
+                 backward_layer=None,
                  in_order="TND",
                  out_order="TND",
                  post_indexes=None,
@@ -418,14 +698,23 @@ class RNNLayer(RecurrenceLayer):
             l_in = ConcatLayer(inputs, axis=1, name="in_concat")
         else:
             # Single input
-            l_in = InputLayer(shapes[0], name="fake_in")
+            if backward_layer is not None:
+                shape = list(shapes[0])
+                shape[-1] *= 2
+            else:
+                shape = shapes[0]
+            l_in = InputLayer(shape, name="fake_in")
         if step_layer.pre_compute_input or not step_layer.combine_h_x:
+            num_units = step_layer.num_x_to_h
+            if backward_layer is not None:
+                num_units += backward_layer.num_x_to_h
             # Dense Wx layer
             l_in = DenseLayer(incoming=l_in,
                               W=W, b=None if step_layer.no_bias else b,
-                              num_units=step_layer.num_x_to_h,
+                              num_units=num_units,
                               nonlinearity=nonlinearities.identity,
                               name="in_to_hid")
+
         post_indexes = post_indexes or step_layer.post_indexes
         l_out = None
         if post_indexes:
@@ -436,11 +725,11 @@ class RNNLayer(RecurrenceLayer):
             l_out = IndexLayer(inputs, post_indexes)
 
         super(RNNLayer, self) \
-            .__init__(incoming, step_layer,
+            .__init__(incoming, step_layer, backward_layer,
                       in_to_hid=l_in, hid_to_out=l_out,
                       in_order=in_order, out_order=out_order,
                       pre_compute_input=step_layer.pre_compute_input,
-                      pass_raw_and_computed=step_layer.pass_raw_and_computed,
+                      # pass_raw_and_computed=step_layer.pass_raw_and_computed,
                       **kwargs)
 
 
@@ -484,9 +773,10 @@ class AbstractStepLayer(Layer):
 
     def __init__(self,
                  incoming,
+                 h_dim,
                  num_x_to_h,
                  pre_compute_input=True,
-                 pass_raw_and_computed=False,
+                 # pass_raw_and_computed=False,
                  combine_h_x=False,
                  no_bias=False,
                  learn_init=True,
@@ -494,8 +784,9 @@ class AbstractStepLayer(Layer):
                  **kwargs):
         super(AbstractStepLayer, self).__init__(incoming, **kwargs)
         self.num_x_to_h = num_x_to_h
+        self.h_dim = h_dim
         self.pre_compute_input = pre_compute_input
-        self.pass_raw_and_computed = pass_raw_and_computed
+        # self.pass_raw_and_computed = pass_raw_and_computed
         self.combine_h_x = combine_h_x
         self.no_bias = no_bias
         self.learn_init = learn_init
@@ -594,7 +885,7 @@ class StandardStep(AbstractStepLayer):
                  b=init.Constant(0.),
                  h_init=init.Constant(0.),
                  **kwargs):
-        super(StandardStep, self).__init__(incoming, num_units,
+        super(StandardStep, self).__init__(incoming, num_units, num_units,
                                            combine_h_x=True, **kwargs)
         if len(self.input_shapes[0]) != 2:
             raise ValueError("StandardStep accepts only 2D inputs")
@@ -680,7 +971,7 @@ class GRUStep(AbstractStepLayer):
                  W=init.Orthogonal(),
                  h_init=init.Constant(0.),
                  **kwargs):
-        super(GRUStep, self).__init__(incoming, 3 * num_units, **kwargs)
+        super(GRUStep, self).__init__(incoming, num_units, 3 * num_units, **kwargs)
         if len(self.input_shapes[0]) != 2:
             raise ValueError("GRUStep accepts only 2D inputs")
         self.W = self.add_param(W, (num_units, 3 * num_units),
@@ -783,7 +1074,7 @@ class LSTMStep(AbstractStepLayer):
                  peepholes=False,
                  post_indexes=(0, ),
                  **kwargs):
-        super(LSTMStep, self).__init__(incoming, 4 * num_units,
+        super(LSTMStep, self).__init__(incoming, num_units, 4 * num_units,
                                        combine_h_x=True,
                                        post_indexes=post_indexes, **kwargs)
         if len(self.input_shapes[0]) != 2:
