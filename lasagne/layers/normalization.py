@@ -42,7 +42,7 @@ import numpy as np
 
 from .. import init
 from .. import nonlinearities
-from ..utils import fetch_pre_activation
+from .. import utils
 
 from .base import Layer
 
@@ -51,6 +51,8 @@ __all__ = [
     "LocalResponseNormalization2DLayer",
     "BatchNormLayer",
     "batch_norm",
+    "LayerNormLayer",
+    "layer_norm"
 ]
 
 
@@ -531,10 +533,7 @@ class BatchNormTheanoLayer(Layer):
         self.alpha = alpha
 
         # create parameters, ignoring all dimensions in axes
-        shape = tuple(self.input_shape[a] for a in range(ndim) if a not in self.axes)
-        if any(size is None for size in shape):
-            raise ValueError("BatchNormLayer needs specified input sizes for "
-                             "all axes not normalized over.")
+        shape = utils.get_shape_except_axes(self.input_shape, axes)
         if beta is None:
             self.beta = None
         else:
@@ -631,7 +630,7 @@ class BatchNormTheanoLayer(Layer):
                 q = curvature.dimshuffle(*shuffle).reshape((d1, d2))
                 make_matrix(self, g_dim, q_dim, g, q, (self.beta, ), name="beta")
             if self.gamma is not None:
-                bn_op = fetch_pre_activation(outputs[0], self.beta, T.nnet.bn.AbstractBatchNormTrain).owner
+                bn_op = utils.fetch_pre_activation(outputs[0], self.beta, T.nnet.bn.AbstractBatchNormTrain).owner
                 mean, inv_std = bn_op.outputs[1], bn_op.outputs[2]
                 normalized = (inputs[0] - mean) * inv_std
                 q1 = curvature.dimshuffle(*shuffle).reshape((d1, d2))
@@ -698,5 +697,136 @@ def batch_norm(layer, use_theano=True, **kwargs):
     if nonlinearity is not None:
         from .special import NonlinearityLayer
         nonlin_name = bn_name and bn_name + '_nonlin'
+        layer = NonlinearityLayer(layer, nonlinearity, name=nonlin_name)
+    return layer
+
+
+class LayerNormLayer(Layer):
+    def __init__(self, incoming, axes='auto', epsilon=1e-4,
+                 beta=init.Constant(0), gamma=init.Constant(1),
+                 **kwargs):
+        super(LayerNormLayer, self).__init__(incoming, **kwargs)
+        self.axes = utils.get_layer_norm_axes(axes, len(self.input_shape))
+        self.epsilon = epsilon
+
+        # create parameters, ignoring all dimensions in axes
+        shape = tuple(self.input_shape[a] for a in range(len(self.input_shape)) if a in self.axes)
+        if any(size is None for size in shape):
+            raise ValueError("LayerNormLayer needs specified input sizes for "
+                             "all axes not normalized over.")
+        if beta is None:
+            self.beta = None
+        else:
+            self.beta = self.add_param(beta, shape, 'beta',
+                                       trainable=True, regularizable=False)
+        if gamma is None:
+            self.gamma = None
+        else:
+            self.gamma = self.add_param(gamma, shape, 'gamma',
+                                        trainable=True, regularizable=True)
+
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
+        return utils.layer_norm_tensor(x, self.gamma, self.beta, self.axes, self.epsilon),
+
+    def params_to_fused(self, params):
+        if len(params) == 1:
+            return params[0].reshape((-1, 1))
+        else:
+            return T.concatenate((params[0].reshape((-1, 1)), params[1].reshape((-1, 1))), axis=0)
+
+    def params_from_fused(self, fused, num):
+        ndim = len(self.input_shape)
+        shape = tuple(self.input_shape[a] for a in range(ndim) if a not in self.axes)
+        if num == 1:
+            return T.reshape(fused, shape),
+        else:
+            n = T.int_div(fused.shape[0], 2)
+            return T.reshape(fused[:n], shape), T.reshape(fused[n:], shape)
+
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
+        raise NotImplementedError
+        assert len(inputs) == 1
+        assert len(curvature) == 1
+        assert len(outputs) == 1
+        curvature = curvature[0]
+
+        if optimizer.variant == "kfra":
+            raise NotImplementedError
+        else:
+            ndim = len(self.input_shape)
+            non_axes = tuple(i for i in range(ndim) if i not in self.axes)
+            shuffle = self.axes + non_axes
+            shape = inputs[0].shape
+            d1 = T.prod([shape[i] for i in self.axes])
+            d2 = np.prod(self.mean.get_value().shape)
+            g_dim = 1
+            g = T.constant(1.0).reshape((1, 1))
+            q_dim = d2
+            if self.beta is not None:
+                q = curvature.dimshuffle(*shuffle).reshape((d1, d2))
+                make_matrix(self, g_dim, q_dim, g, q, (self.beta, ), name="beta")
+            if self.gamma is not None:
+                bn_op = fetch_pre_activation(outputs[0], self.beta, T.nnet.bn.AbstractBatchNormTrain).owner
+                mean, inv_std = bn_op.outputs[1], bn_op.outputs[2]
+                normalized = (inputs[0] - mean) * inv_std
+                q1 = curvature.dimshuffle(*shuffle).reshape((d1, d2))
+                q2 = normalized.dimshuffle(*shuffle).reshape((d1, d2))
+                q = q1 * q2
+                make_matrix(self, g_dim, q_dim, g, q, (self.gamma,), name="gamma")
+            return T.Lop(outputs[0], inputs[0], curvature),
+
+
+def layer_norm(layer, **kwargs):
+    """
+    Apply layer normalization to an existing layer. This is a convenience
+    function modifying an existing layer to include layer normalization: It
+    will steal the layer's nonlinearity if there is one (effectively
+    introducing the normalization right before the nonlinearity), remove
+    the layer's bias if there is one (because it would be redundant), and add
+    a :class:`LayerNormLayer` and :class:`NonlinearityLayer` on top.
+
+    Parameters
+    ----------
+    layer : A :class:`Layer` instance
+        The layer to apply the normalization to; note that it will be
+        irreversibly modified as specified above
+    **kwargs
+        Any additional keyword arguments are passed on to the
+        :class:`LayerNormLayer` constructor.
+
+    Returns
+    -------
+    LayerNormLayer or NonlinearityLayer instance
+        A layer normalization layer stacked on the given modified `layer`, or
+        a nonlinearity layer stacked on top of both if `layer` was nonlinear.
+
+    Examples
+    --------
+    Just wrap any layer into a :func:`layer_norm` call on creating it:
+
+    >>> from lasagne.layers import InputLayer, DenseLayer, layer_norm
+    >>> from lasagne.nonlinearities import tanh
+    >>> l1 = InputLayer((64, 768))
+    >>> l2 = layer_norm(DenseLayer(l1, num_units=500, nonlinearity=tanh))
+
+    This introduces layer normalization right before its nonlinearity:
+
+    >>> from lasagne.layers import get_all_layers
+    >>> [l.__class__.__name__ for l in get_all_layers(l2)]
+    ['InputLayer', 'DenseLayer', 'LayerNormLayer', 'NonlinearityLayer']
+    """
+    nonlinearity = getattr(layer, 'nonlinearity', None)
+    if nonlinearity is not None:
+        layer.nonlinearity = nonlinearities.identity
+    if hasattr(layer, 'b') and layer.b is not None:
+        del layer.params[layer.b]
+        layer.b = None
+    name = (kwargs.pop('name', None) or
+            (getattr(layer, 'name', None) and layer.name + '_ln'))
+    layer = LayerNormLayer(layer, name=name, **kwargs)
+    if nonlinearity is not None:
+        from .special import NonlinearityLayer
+        nonlin_name = name and name + '_nonlin'
         layer = NonlinearityLayer(layer, nonlinearity, name=nonlin_name)
     return layer

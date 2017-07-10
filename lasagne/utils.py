@@ -970,12 +970,51 @@ def set_parameters(params, value_mapping, verbose=True):
 
 
 def Rop(f, wrt, v):
-    # try:
-    return T.Rop(f, wrt, v)
-    # except:
-    #     if isinstance(f, (list, tuple)):
-    #         u = [T.zeros_like(i) for i in f]
-    #         return T.Lop(T.Lop(f, wrt, u), u, v)
-    #     else:
-    #         u = T.zeros_like(f)
-    #         return T.Lop(T.Lop(f, wrt, u), u, v)
+    try:
+        return T.Rop(f, wrt, v)
+    except:
+        if isinstance(f, (list, tuple)):
+            u = [T.zeros_like(i) for i in f]
+            return T.Lop(T.Lop(f, wrt, u), u, v)
+        else:
+            u = T.zeros_like(f)
+            return T.Lop(T.Lop(f, wrt, u), u, v)
+
+
+def get_shape_except_axes(tensor_shape, axes, ndim=None):
+    ndim = ndim if ndim is not None else len(tensor_shape)
+    shape = tuple(tensor_shape[a] for a in range(ndim) if a not in axes)
+    if any(size is None for size in shape):
+        raise ValueError("get_shape_except_axes needs specified input sizes for "
+                         "all axes not normalized over.")
+    return shape
+
+
+def get_layer_norm_axes(axes, ndim):
+    if axes == 'auto':
+        axes = range(1, ndim)
+    elif axes == "spatial":
+        axes = range(2, ndim)
+    else:
+        axes = tuple(int(a) for a in axes)
+    axes = tuple(sorted(axes))
+    if len(axes) == 0:
+        raise ValueError('there should be at least one normalization axis')
+    if min(axes) < 0 or max(axes) >= ndim:
+        raise ValueError('axes should be less than ndim (<%d), but %s given' % (ndim, str(axes)))
+    return axes
+
+
+def layer_norm_tensor(tensor, gamma, beta, axes='auto', epsilon=1e-4):
+    axes = get_layer_norm_axes(axes, tensor.ndim)
+    pattern = ['x' for _ in range(tensor.ndim)]
+    for i, a in enumerate(axes):
+        pattern[a] = i
+    gamma = 1 if gamma is None else gamma.dimshuffle(*pattern)
+    beta = 0 if beta is None else beta.dimshuffle(*pattern)
+    bn = T.nnet.bn.batch_normalization_train
+    shape = get_shape_except_axes(tensor.shape, axes, tensor.ndim)
+    fake_g = T.ones(shape)
+    fake_b = T.zeros(shape)
+    normalized, _, _ = bn(tensor, fake_g, fake_b, axes, epsilon, 0)
+    return  normalized * gamma + beta
