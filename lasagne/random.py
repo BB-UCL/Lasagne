@@ -303,10 +303,12 @@ def uniform_ball(shape, radius=None, dtype=None, random=None):
 @multi_sampler
 def matrix_normal(shape, M=None, A=None, B=None, dtype=None, mode="cov"):
     dtype = dtype or theano.config.floatX
-    if len(shape) == 2:
+    try:
         n, p = shape
-    else:
+        single_sample = True
+    except ValueError:
         n, p = shape[1:]
+        single_sample = False
     if M is None:
         M = T.zeros((n, p), dtype=dtype)
     if A is None:
@@ -318,7 +320,7 @@ def matrix_normal(shape, M=None, A=None, B=None, dtype=None, mode="cov"):
     if M is None and A is None and B is None:
         return X
 
-    if len(shape) == 2:
+    if single_sample:
         if mode == "cov":
             return M + A.dot(X).dot(B)
         elif mode == "prec":
