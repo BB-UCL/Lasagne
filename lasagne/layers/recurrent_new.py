@@ -742,8 +742,8 @@ class GRUStep(AbstractStepLayer):
                  nonlinearity=nonlinearities.tanh,
                  gates_function=nonlinearities.sigmoid,
                  W=init.Orthogonal(),
-                 b=init.Constant(0.),
-                 h_init=init.Constant(0.),
+                 b=init.Constant(1.0),
+                 h_init=init.Constant(),
                  **kwargs):
         super(GRUStep, self).__init__(incoming, num_units, 3 * num_units,
                                       bias_init=b, **kwargs)
@@ -849,7 +849,7 @@ class LSTMStep(AbstractStepLayer):
                  nonlinearity=nonlinearities.tanh,
                  gates_function=nonlinearities.sigmoid,
                  W=init.Orthogonal(),
-                 b=init.Constant(),
+                 b=init.Constant(1.0),
                  h_init=init.Constant(),
                  c_init=init.Constant(),
                  w_peep=init.GlorotUniform(),
