@@ -584,8 +584,14 @@ class BatchNormTheanoLayer(Layer):
             # and make sure they end up in the graph without participating in
             # the computation (this way their default_update will be collected
             # and applied, but the computation will be optimized away):
-            out += 0 * self.mean
-            out += 0 * self.var
+            pattern = ['x' for _ in range(out.ndim)]
+            c = 0
+            for i in range(out.ndim):
+                if i not in self.axes:
+                    pattern[i] = c
+                    c += 1
+            out += 0 * self.mean.dimshuffle(*pattern)
+            out += 0 * self.var.dimshuffle(*pattern)
         else:
             bn = T.nnet.bn.batch_normalization_train
             out, _, _, _, _ = bn(x, gamma, beta, self.axes,

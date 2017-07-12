@@ -896,26 +896,23 @@ class LSTMStep(AbstractStepLayer):
             a = self.inner_layers["layer_norm"].get_output_for(a)
         a = a + x
         if self.W_peep is not None:
-            raise NotImplementedError
-            peep_holes = c * self.W_peep.dimshuffle("x", 0)
+            peep_holes = T.dot(c, self.W_peep)
+            if self.layer_norm:
+                peep_holes = self.inner_layers["layer_norm_peep"].get_output_for(peep_holes)
             in_forget = self.g(a[:, :2*n] + peep_holes[:, :2*n])
-            i = in_forget[:, :n]
-            f = in_forget[:, n:]
-            c = f * c + i * self.f(a[:, 2*n:3*n])
-            o = self.g(a[:, 3*n:] + peep_holes[:, 2*n:])
-            h = o * self.f(c)
-            return h, c
+            o = self.g(a[:, 3 * n:] + peep_holes[:, 2 * n:])
         else:
             in_forget = self.g(a[:, :2 * n])
-            i = in_forget[:, :n]
-            f = in_forget[:, n:]
-            upd_c = self.f(a[:, 2 * n:3 * n])
-            if dropout is not None:
-                upd_c = dropout(upd_c)
-            c = f * c + i * upd_c
             o = self.g(a[:, 3 * n:])
-            h = o * self.f(c)
-            return h, c
+        
+        i = in_forget[:, :n]
+        f = in_forget[:, n:]
+        upd_c = self.f(a[:, 2*n:3*n])
+        if dropout is not None:
+            upd_c = dropout(upd_c)
+        c = f * c + i * upd_c
+        h = o * self.f(c)
+        return h, c
 
 
 class RWAStep(AbstractStepLayer):

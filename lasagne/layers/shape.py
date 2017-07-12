@@ -16,7 +16,8 @@ __all__ = [
     "PadLayer",
     "pad",
     "SliceLayer",
-    "ReverseLayer"
+    "ReverseLayer",
+    "RepeatLayer"
 ]
 
 
@@ -431,3 +432,20 @@ class ReverseLayer(Layer):
             return x[:, :, :, ::-1],
         else:
             raise NotImplementedError
+
+     
+class RepeatLayer(Layer):
+    def __init__(self, incoming, repeats, axis, **kwargs):
+        super(RepeatLayer, self).__init__(incoming, **kwargs)
+        self.repeats = repeats
+        self.axis = axis
+
+    def get_output_shapes_for(self, input_shapes):
+        return input_shapes[0][:self.axis] + (self.repeats, ) + input_shapes[0][self.axis:],
+    
+    def get_outputs_for(self, inputs, **kwargs):
+        x = inputs[0]
+        pattern = tuple(range(x.ndim))
+        pattern = pattern[:self.axis] + ('x', ) + pattern[self.axis:]
+        x = x.dimshuffle(*pattern)
+        return T.repeat(x, self.repeats, self.axis),
