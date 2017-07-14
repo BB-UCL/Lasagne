@@ -51,6 +51,7 @@ __all__ = [
     "LocalResponseNormalization2DLayer",
     "BatchNormLayer",
     "batch_norm",
+    "BatchNormTheanoLayer",
     "LayerNormLayer",
     "layer_norm"
 ]

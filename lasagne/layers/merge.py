@@ -398,8 +398,11 @@ class ElemwiseSumLayer(ElemwiseMergeLayer):
 
     def get_outputs_for(self, inputs, **kwargs):
         # if needed multiply each input by its coefficient
-        inputs = [x * coeff if coeff != 1 else input
+        inputs = [x * coeff if coeff != 1 else x
                   for coeff, x in zip(self.coeffs, inputs)]
 
         # pass scaled inputs to the super class for summing
         return super(ElemwiseSumLayer, self).get_outputs_for(inputs, **kwargs)
+
+    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
+        return curvature[0], curvature[0]

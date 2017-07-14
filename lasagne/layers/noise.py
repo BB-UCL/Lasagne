@@ -79,7 +79,7 @@ class DropoutLayer(Layer):
     def get_outputs_for(self, inputs, deterministic=False, **kwargs):
         x = inputs[0]
         if deterministic or self.p == 0:
-            return x
+            return x,
         else:
             # Using theano constant to prevent upcasting
             one = T.constant(1)
