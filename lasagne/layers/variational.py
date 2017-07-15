@@ -401,6 +401,7 @@ class GaussianLikelihood(SKFGNLossLayer):
 
     The distribution `p` should be represented as the concatenation of a mean
     and a standard deviation as parametrized by `GaussianParameters` layer.
+    If `p` is None than it is assumed to be a Standard Gaussian.
 
     Formally:
         - 0.5 log(2 pi) - log(sigma) - 0.5 (x - mu)^2/sigma^2
@@ -441,15 +442,13 @@ class GaussianLikelihood(SKFGNLossLayer):
         x = T.flatten(x, outdim=2)
         if len(inputs) == 2:
             if self.unit_variance:
-                mu = utils.expand_variable(inputs[1], self.repeats[1])
-                mu = T.flatten(mu, outdim=2)
+                mu = inputs[1]
+                mu = utils.expand_variable(T.flatten(mu, outdim=2), self.repeats[1])
                 sigma = T.constant(1)
             else:
                 mu, sigma = GaussianParameters.get_raw(inputs[1])
-                mu = utils.expand_variable(mu, self.repeats[1])
-                mu = T.flatten(mu, outdim=2)
-                sigma = utils.expand_variable(sigma, self.repeats[1])
-                sigma = T.flatten(sigma, outdim=2)
+                mu = utils.expand_variable(T.flatten(mu, outdim=2), self.repeats[1])
+                sigma = utils.expand_variable(T.flatten(sigma, outdim=2), self.repeats[1])
             if self.path_derivative:
                 mu = zero_grad(mu)
                 sigma = zero_grad(sigma)
@@ -462,60 +461,57 @@ class GaussianLikelihood(SKFGNLossLayer):
 
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         assert len(curvature) == 1
-        weight = curvature[0]
+        weight = T.sqrt(curvature[0])
         x = inputs[0]
         if len(inputs) == 2:
             if self.unit_variance:
                 mu = inputs[1]
                 if optimizer.variant == "skfgn-rp":
                     cl_v, cl_mu = optimizer.random_sampler((x.shape, mu.shape))
-                    cl_v *= T.sqrt(weight)
-                    cl_mu *= T.sqrt(weight)
+                    cl_v *= weight
+                    cl_mu *= weight
                     return cl_v, cl_mu
                 elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
                     fake_dx, fake_dmu = normal((x.shape, mu.shape))
-                    fake_dx *= T.sqrt(weight)
-                    fake_dmu *= T.sqrt(weight)
+                    fake_dx *= weight
+                    fake_dmu *= weight
                     return fake_dx, fake_dmu
                 elif optimizer.variant == "kfra":
                     if x.ndim == 1:
-                        gn_x = weight
-                        gn_mu = weight
+                        gn_x = weight**2
+                        gn_mu = weight**2
                     elif x.ndim == 2:
                         x = T.flatten(x, outdim=2)
                         gn_x = T.eye(x.shape[1])
-                        gn_x *= weight
+                        gn_x *= weight**2
                         mu = T.flatten(mu, outdim=2)
                         gn_mu = T.eye(mu.shape[1])
-                        gn_mu *= weight
+                        gn_mu *= weight**2
                     else:
                         raise ValueError("KFRA can not work on more than 2 dimensions.")
                     return gn_x, gn_mu
                 else:
                     raise ValueError("Unreachable!")
             else:
-                mu, sigma = GaussianParameters.get_raw(inputs[1])
-                mu = utils.expand_variable(mu, self.num_samples)
-                sigma = utils.expand_variable(sigma, self.num_samples)
                 # TODO
                 raise NotImplementedError
         else:
             assert len(inputs) == 1
             if optimizer.variant == "skfgn-rp":
                 cl_v = optimizer.random_sampler(x.shape)
-                cl_v *= T.sqrt(weight)
+                cl_v *= weight
                 return cl_v,
             elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
                 fake_dx = normal(x.shape)
-                fake_dx *= T.sqrt(weight)
+                fake_dx *= weight
                 return fake_dx,
             elif optimizer.variant == "kfra":
                 if x.ndim == 1:
-                    gn_x = weight
+                    gn_x = weight**2
                 elif x.ndim == 2:
                     x = T.flatten(x, outdim=2)
                     gn_x = T.eye(x.shape[1])
-                    gn_x *= weight
+                    gn_x *= weight**2
                 else:
                     raise ValueError("KFRA can not work on more than 2 dimensions.")
                 return gn_x,

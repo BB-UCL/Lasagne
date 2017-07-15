@@ -767,7 +767,7 @@ def gauss_newton_product(outputs, outputs_hess, params, v1, v2=None):
         Jv1 = Rop(outputs, params, v1)
         Jv2 = Rop(outputs, params, v2) if v2 else Jv1
         return T.mean(T.sum(Jv1 * Jv2 * outputs_hess, axis=1))
-    except KeyError:
+    except theano.gradient.DisconnectedInputError:
         return T.constant(0)
 
 
@@ -969,16 +969,16 @@ def set_parameters(params, value_mapping, verbose=True):
                 print("Skipping parameter", p.name)
 
 
-def Rop(f, wrt, v, **kwargs):
-    try:
-        return T.Rop(f, wrt, v)
-    except:
+def Rop(f, wrt, v, disconnected_outputs="raise", use_lop=False):
+    if use_lop:
         if isinstance(f, (list, tuple)):
             u = [T.zeros_like(i) for i in f]
-            return T.Lop(T.Lop(f, wrt, u, disconnected_inputs="ignore"), u, v)
+            return T.Lop(T.Lop(f, wrt, u, disconnected_inputs=disconnected_outputs), u, v)
         else:
             u = T.zeros_like(f)
-            return T.Lop(T.Lop(f, wrt, u, disconnected_inputs="ignore"), u, v)
+            return T.Lop(T.Lop(f, wrt, u, disconnected_inputs=disconnected_outputs), u, v)
+    else:
+        return T.Rop(f, wrt, v, disconnected_outputs=disconnected_outputs)
 
 
 def get_shape_except_axes(tensor_shape, axes, ndim=None):
