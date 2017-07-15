@@ -506,10 +506,17 @@ class Optimizer(object):
                 input_curvature[layer] = curvature_map[layer]
                 continue
 
+            if curvature_map.get(layer) is None:
+                msg = "Layer {}({}) has incoming curvature None."\
+                    .format(layer.name, type(layer).__name__)
+                warnings.warn(msg)
+                continue
             # Extract the needed information of the current layer
             inputs = inputs_map[layer]
             outputs = outputs_map[layer]
             curvature = curvature_map[layer]
+            if isinstance(curvature[0], list):
+                curvature = list(self.combine_curvature_propagation(c) for c in curvature)
 
             # Propagate the curvature
             curvature = layer.curvature_propagation(self, inputs, outputs, curvature, make_matrix)
@@ -523,16 +530,35 @@ class Optimizer(object):
                     raise NotImplementedError
                 if current_curvature[0] is not None:
                     if curvature_map.get(l) is not None:
-                        curvature_map[l] = [old + new for old, new in zip(curvature_map[l], current_curvature)]
+                        if isinstance(curvature_map[l][0], list):
+                            for i in range(len(curvature_map[l])):
+                                curvature_map[l][i].append(current_curvature[i])
+                        else:
+                            for i in range(len(curvature_map[l])):
+                                curvature_map[l][i] = [curvature_map[l][i], current_curvature[i]]
+                        # curvature_map[l] = [old + new for old, new in zip(curvature_map[l], current_curvature)]
                     else:
-                        curvature_map[l] = current_curvature
-                    c += l.num_outputs
+                        curvature_map[l] = list(current_curvature)
                 else:
                     if not isinstance(l, InputLayer):
-                        warnings.warn("Layer {}({}) has incoming curvature None."
-                                      .format(l.name, type(l).__name__))
+                        msg = "Layer {}({}) has incoming curvature None from {}."\
+                            .format(l.name, type(l).__name__, layer.name)
+                        warnings.warn(msg)
+                c += l.num_outputs
 
         return kf_matrices
+
+    def combine_curvature_propagation(self, tensors):
+        return sum(tensors)
+        # if self.variant == "kfra":
+        #     return sum(tensors)
+        # else:
+        #     means = [T.mean(t, axis=0) for t in tensors]
+        #     mean_norms = [T.sum(T.sqr(m)) for m in means]
+        #     overall_norm = T.sum(T.sqr(sum(means)))
+        #     alpha = T.sqrt(sum(mean_norms) / overall_norm) - 1
+        #     pattern = ['x'] + list(range(means[0].ndim))
+        #     return sum(tensors) + alpha * sum(means).dimshuffle(*pattern)
 
     def gn_rescale(self, gauss_newton_product, grads, steps1, steps2=None):
         # The second order Taylor expansion of f(x) gives us:

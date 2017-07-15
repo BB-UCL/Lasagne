@@ -969,16 +969,16 @@ def set_parameters(params, value_mapping, verbose=True):
                 print("Skipping parameter", p.name)
 
 
-def Rop(f, wrt, v):
+def Rop(f, wrt, v, **kwargs):
     try:
         return T.Rop(f, wrt, v)
     except:
         if isinstance(f, (list, tuple)):
             u = [T.zeros_like(i) for i in f]
-            return T.Lop(T.Lop(f, wrt, u), u, v)
+            return T.Lop(T.Lop(f, wrt, u, disconnected_inputs="ignore"), u, v)
         else:
             u = T.zeros_like(f)
-            return T.Lop(T.Lop(f, wrt, u), u, v)
+            return T.Lop(T.Lop(f, wrt, u, disconnected_inputs="ignore"), u, v)
 
 
 def get_shape_except_axes(tensor_shape, axes, ndim=None):

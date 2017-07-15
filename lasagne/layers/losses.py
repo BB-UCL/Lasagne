@@ -312,7 +312,7 @@ def bernoulli_logits_ll(output, target,
     layer = BinaryLogitsCrossEntropy(output, target,
                                      x_repeats, y_repeats,
                                      *args, **kwargs)
-    return SumLosses(layer, mode="merge", weights=[-1])
+    return SumLosses(layer, name=kwargs.get("name", "")+"_neg", mode="merge", weights=[-1])
 
 
 class CategoricalLogitsCrossEntropy(SKFGNLossLayer):
@@ -404,7 +404,7 @@ def categorical_logits_ll(output, target,
     layer = CategoricalLogitsCrossEntropy(output, target,
                                           x_repeats, y_repeats,
                                           *args, **kwargs)
-    return SumLosses(layer, mode="merge", weights=[-1])
+    return SumLosses(layer, name=kwargs.get("name", "")+"_neg", mode="merge", weights=[-1])
 
 
 class BetaCrossEntropy(SKFGNLossLayer):
@@ -536,4 +536,4 @@ def beta_ll(output, target, x_repeats=1, y_repeats=1, *args, **kwargs):
                              x_repeats=x_repeats,
                              y_repeats=y_repeats,
                              *args, **kwargs)
-    return SumLosses(layer, mode="merge", weights=[-1])
+    return SumLosses(layer, name=kwargs.get("name", "")+"_neg", mode="merge", weights=[-1])
