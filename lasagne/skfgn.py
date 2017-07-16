@@ -333,8 +333,11 @@ class Optimizer(object):
         # Add all extra updates from SKFGN
         if self.debug:
             print("Standard parameters' updates:")
+            c = 0
             for p, v in updates.items():
                 print(p.name, p.get_value().shape, ":=", v)
+                c += np.prod(p.get_value().shape)
+            print("Total parameters:", c)
             print("Extra updates:")
             for u, v in extra_updates.items():
                 print(u.name, u.get_value().shape, ":=", v)
@@ -454,10 +457,12 @@ class Optimizer(object):
                                                  k=self.tikhonov_damping)
                 kf_matrices.append(kf_mat)
         else:
-            def make_matrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt, params, name=None):
+            def make_matrix(owning_layer, a_dim, b_dim, a_sqrt, b_sqrt, params,
+                            n_a=None, n_b=None, name=None):
                 name = name + "_" if name else ""
                 if a_dim is None:
                     mat = SqrtMatrix(b_dim, b_sqrt,
+                                     n=n_b,
                                      layer=owning_layer, params=params,
                                      k=0.0,
                                      init_k=self.tikhonov_damping,
@@ -465,6 +470,7 @@ class Optimizer(object):
                                      name=name)
                 elif b_dim is None:
                     mat = SqrtMatrix(a_dim, a_sqrt,
+                                     n_a=n,
                                      layer=owning_layer, params=params,
                                      k=0.0,
                                      init_k=self.tikhonov_damping,

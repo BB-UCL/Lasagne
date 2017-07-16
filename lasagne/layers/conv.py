@@ -303,17 +303,20 @@ class BaseConvLayer(Layer):
         if self.fuse_bias:
             w_shape = self.get_W_shape()
             if b is None:
-                self.W_fused = self.add_param(W, (w_shape[1] * w_shape[2] * w_shape[3], w_shape[0]), name="W")
+                self.W_fused = self.add_param(W, (w_shape[1] * w_shape[2] * w_shape[3], w_shape[0]),
+                                              name="W", broadcast_unit_dims=False)
                 self.b = None
                 self.W,  = self.params_from_fused(self.W_fused, 1)
             elif self.untie_biases:
                 raise ValueError("Can not fuse biases and untie them.")
             else:
                 w_fuse_shape = (w_shape[1] * w_shape[2] * w_shape[3] + 1, w_shape[0])
-                self.W_fused = self.add_param(W, w_fuse_shape, name="W_fused")
+                self.W_fused = self.add_param(W, w_fuse_shape,
+                                              name="W_fused", broadcast_unit_dims=False)
                 self.W, self.b = self.params_from_fused(self.W_fused, 2)
         else:
-            self.W = self.add_param(W, self.get_W_shape(), name="W")
+            self.W = self.add_param(W, self.get_W_shape(),
+                                    name="W", broadcast_unit_dims=False)
             if b is None:
                 self.b = None
                 self.W_fused = self.params_to_fused((self.W, ))
@@ -361,6 +364,8 @@ class BaseConvLayer(Layer):
     def image_to_mat(self, image):
         if self.pad == as_tuple(0, len(self.pad)):
             pad = "valid"
+        else:
+            pad = self.pad
         if pad not in ("same", "valid", "half"):
             raise ValueError("SKFGN supports only pad='same', 'valid' and 'full'")
         border_mode = 'half' if pad == 'same' else pad
@@ -691,6 +696,8 @@ class Conv2DLayer(BaseConvLayer):
         assert len(outputs) == 1
         if self.pad == as_tuple(0, len(self.pad)):
             pad = "valid"
+        else:
+            pad = self.pad
         if pad not in ("same", "valid", "half"):
             raise ValueError("SKFGN supports only pad='same', 'valid' and 'full', not {}"
                              .format(self.pad))
@@ -725,8 +732,7 @@ class Conv2DLayer(BaseConvLayer):
             if self.nonlinearity != nonlinearities.identity:
                 curvature = T.Lop(outputs[0], activation, curvature)
             g_factor = curvature.dimshuffle(0, 2, 3, 1).reshape((-1, curvature.shape[1]))
-            make_matrix(self, g_dim, q_dim, g_factor, x, self.get_params(),
-                        n_a=n, n_b=n)
+            make_matrix(self, g_dim, q_dim, g_factor, x, self.get_params(), n_b=n)
             return T.Lop(activation, inputs[0], curvature),
 
 # TODO: add Conv3DLayer
