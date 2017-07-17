@@ -431,6 +431,19 @@ class Layer(object):
         """
         return None
 
+    # def serialize(self):
+    #     raise NotImplementedError
+    #
+    # @staticmethod
+    # def deserialize(layer):
+    #     raise NotImplementedError
+    #
+    # def base_deserialize(self):
+    #     kwargs = OrderedDict()
+    #     kwargs["name"] = self._name
+    #     kwargs["prefix"] = self._prefix
+    #     kwargs["incomming"] = [l if l is not None else self.input_shapes[i] for i, l in enumerate(self.input_layers)]
+
 
 class IndexLayer(Layer):
     def __init__(self, incoming, indexes, including=True, **kwargs):
@@ -454,3 +467,11 @@ class IndexLayer(Layer):
     def get_outputs_for(self, inputs, **kwargs):
         assert len(inputs) == len(self.input_shapes)
         return tuple(inputs[i] for i in self.indexes)
+
+    # def serialize(self):
+    #
+    #     raise NotImplementedError
+    #
+    # @staticmethod
+    # def deserialize(layer):
+    #     raise NotImplementedError
