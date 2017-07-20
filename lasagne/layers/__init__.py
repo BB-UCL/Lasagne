@@ -15,3 +15,4 @@ from .recurrent_new import *
 from .special import *
 from .losses import *
 from .variational import *
+from .extra import *

@@ -1,0 +1,54 @@
+{
+  "network": [
+    {
+      "layer": "input",
+      "name": "x",
+      "shape": [null, "D"]
+    },
+    {
+      "layer": "dense_stack",
+      "incoming": "x",
+      "name": "q_z1",
+      "num_repeats": 2,
+      "units": 512,
+      "nonlinearity": "tanh",
+      "last_kwargs": {
+        "num_units": 128,
+        "nonlinearity": "gaussian_parametrization"
+      }
+    },
+    {
+      "layer": "gaussian_sampler",
+      "incoming": "q_z1",
+      "name": "z1_sample"
+    },
+    {
+      "layer": "dense_stack",
+      "incoming": "z1_sample",
+      "name": "p_logits",
+      "num_repeats": 2,
+      "units": 512,
+      "nonlinearity": "tanh",
+      "last_kwargs": {
+        "num_units": "D",
+        "nonlinearity": "identity"
+      }
+    },
+    {
+      "layer": "gaussian_kl",
+      "q": "q_z1",
+      "name": "kl_z1"
+    },
+    {
+      "layer": "binary_logits_cross_entropy",
+      "q_logits": "p_logits",
+      "p": "x",
+      "name": "neg_log_p_v"
+    },
+    {
+      "layer": "sum_losses",
+      "incoming": ["kl_z1", "neg_log_p_v"],
+      "name": "neg_elbo"
+    }
+  ]
+}

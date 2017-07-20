@@ -69,7 +69,7 @@ def shared_empty(dim=2, dtype=None):
     return theano.shared(np.zeros(shp, dtype=dtype))
 
 
-def as_theano_expression(input):
+def as_theano_expression(x):
     """Wrap as Theano expression.
 
     Wraps the given input as a Theano constant if it is not
@@ -78,7 +78,7 @@ def as_theano_expression(input):
 
     Parameters
     ----------
-    input : number, numpy array or Theano expression
+    x : number, numpy array or Theano expression
         Expression to be converted to a Theano constant.
 
     Returns
@@ -87,10 +87,10 @@ def as_theano_expression(input):
         Theano constant version of `input`.
     """
     if isinstance(input, theano.gof.Variable):
-        return input
+        return x
     else:
         try:
-            return theano.tensor.constant(input)
+            return T.constant(x)
         except Exception as e:
             raise TypeError("Input of type %s is not a Theano expression and "
                             "cannot be wrapped as a Theano constant (original "
@@ -325,6 +325,8 @@ def compute_norms(array, norm_axes=None):
             norms = abs(array)     # abs if we have nothing to sum over
         else:
             norms = np.sqrt(np.sum(array**2, axis=sum_over))
+    else:
+        raise ValueError("Unreachable!")
 
     return norms
 
@@ -1017,4 +1019,16 @@ def layer_norm_tensor(tensor, gamma, beta, axes='auto', epsilon=1e-4):
     fake_g = T.ones(shape)
     fake_b = T.zeros(shape)
     normalized, _, _ = bn(tensor, fake_g, fake_b, axes, epsilon, 0)
-    return  normalized * gamma + beta
+    return normalized * gamma + beta
+
+
+def split_half(x, axis=1):
+        d = T.int_div(x.shape[axis], 2)
+        if axis == 0:
+            return x[:d], x[d:]
+        elif axis == 1:
+            return x[:, :d], x[:, d:]
+        elif axis == 2:
+            return x[:, :, :d], x[:, :, d:]
+        else:
+            return x[:, :, :, :d], x[:, :, :, d:]

@@ -4,6 +4,7 @@ from theano.gradient import zero_grad
 import numpy as np
 
 from .base import Layer
+from .special import NonlinearityLayer
 from .losses import SKFGNLossLayer
 from .. import nonlinearities
 from .. import utils
@@ -20,57 +21,63 @@ __all__ = [
 ]
 
 
-class GaussianParameters(Layer):
-    """
-    A layer that will transform a concatenated mean and pre-sigma to
-    a concatenated mean and sigma.
-    The transformation is only on pre-sigma via some nonlinear function
-    which should always output positive values.
+# class GaussianParameters(Layer):
+#     """
+#     A layer that will transform a concatenated mean and pre-sigma to
+#     a concatenated mean and sigma.
+#     The transformation is only on pre-sigma via some nonlinear function
+#     which should always output positive values.
+#
+#     Parameters
+#     ----------
+#     incoming : a :class:`Layer` instance or a tuple or a list
+#         The layer feeding into this layer, or the expected input shape
+#
+#     nonlinearity : callable
+#         The function to apply to sigma. By default it is
+#         `lasagne.nonlinearities.softplus`.
+#
+#     eps : a float
+#         A conditioning number to ensure the final sigma is not 0.
+#     """
+#     def __init__(self, incoming, nonlinearity=nonlinearities.softplus,
+#                  eps=1e-6, **kwargs):
+#         super(GaussianParameters, self).__init__(incoming, **kwargs)
+#         self.nonlinearity = nonlinearity
+#         self.eps = eps
+#
+#     @staticmethod
+#     def get_raw(distribution):
+#         d = T.int_div(distribution.shape[1], 2)
+#         mu = distribution[:, :d]
+#         pre_sigma = distribution[:, d:]
+#         return mu, pre_sigma
+#
+#     def get_outputs_for(self, inputs, **kwargs):
+#         assert len(inputs) == 1
+#         mu, pre_sigma = GaussianParameters.get_raw(inputs[0])
+#         sigma = self.nonlinearity(pre_sigma) + self.eps
+#         return T.concatenate((mu, sigma), axis=1),
+#
+#     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
+#         assert len(inputs) == 1
+#         assert len(curvature) == 1
+#         assert len(outputs) == 1
+#         if optimizer.variant == "kfra":
+#             _, pre_sigma = GaussianParameters.get_raw(inputs[0])
+#             n = utils.th_fx(pre_sigma.shape[0])
+#             sigma = self.nonlinearity(pre_sigma) + self.eps
+#             a = T.Lop(sigma, pre_sigma, T.ones_like(sigma))
+#             a = T.concatenate((T.ones_like(a), a), axis=1)
+#             return curvature[0] * T.dot(a.T, a) / n,
+#         else:
+#             return T.Lop(outputs[0], inputs[0], curvature[0]),
 
-    Parameters
-    ----------
-    incoming : a :class:`Layer` instance or a tuple or a list
-        The layer feeding into this layer, or the expected input shape
 
-    nonlinearity : callable
-        The function to apply to sigma. By default it is
-        `lasagne.nonlinearities.softplus`.
-
-    eps : a float
-        A conditioning number to ensure the final sigma is not 0.
-    """
-    def __init__(self, incoming, nonlinearity=nonlinearities.softplus,
-                 eps=1e-6, **kwargs):
-        super(GaussianParameters, self).__init__(incoming, **kwargs)
-        self.nonlinearity = nonlinearity
-        self.eps = eps
-
-    @staticmethod
-    def get_raw(distribution):
-        d = T.int_div(distribution.shape[1], 2)
-        mu = distribution[:, :d]
-        pre_sigma = distribution[:, d:]
-        return mu, pre_sigma
-
-    def get_outputs_for(self, inputs, **kwargs):
-        assert len(inputs) == 1
-        mu, pre_sigma = GaussianParameters.get_raw(inputs[0])
-        sigma = self.nonlinearity(pre_sigma) + self.eps
-        return T.concatenate((mu, sigma), axis=1),
-
-    def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
-        assert len(inputs) == 1
-        assert len(curvature) == 1
-        assert len(outputs) == 1
-        if optimizer.variant == "kfra":
-            _, pre_sigma = GaussianParameters.get_raw(inputs[0])
-            n = utils.th_fx(pre_sigma.shape[0])
-            sigma = self.nonlinearity(pre_sigma) + self.eps
-            a = T.Lop(sigma, pre_sigma, T.ones_like(sigma))
-            a = T.concatenate((T.ones_like(a), a), axis=1)
-            return curvature[0] * T.dot(a.T, a) / n,
-        else:
-            return T.Lop(outputs[0], inputs[0], curvature[0]),
+def GaussianParameters(incoming, **kwargs):
+    return NonlinearityLayer(incoming,
+                             nonlinearity=nonlinearities.gaussian_parametrization,
+                             **kwargs)
 
 
 class GaussianSampler(Layer):
@@ -115,7 +122,7 @@ class GaussianSampler(Layer):
             return out_shape,
 
     def get_outputs_for(self, inputs, **kwargs):
-        mu, sigma = GaussianParameters.get_raw(inputs[0])
+        mu, sigma = utils.split_half(inputs[0])
         n, d = mu.shape
         epsilon = normal((n, self.num_samples, d))
         samples = mu.dimshuffle(0, 'x', 1) + sigma.dimshuffle(0, 'x', 1) * epsilon
@@ -211,18 +218,18 @@ class GaussianKL(SKFGNLossLayer):
         assert len(self.input_shapes) == len(inputs)
         if self.state == 1:
             q, p = inputs
-            q_mu, q_sigma = GaussianParameters.get_raw(q)
-            p_mu, p_sigma = GaussianParameters.get_raw(p)
+            q_mu, q_sigma = utils.split_half(q)
+            p_mu, p_sigma = utils.split_half(p)
         elif self.state == 2:
             q, p = inputs[0], None
-            q_mu, q_sigma = GaussianParameters.get_raw(q)
+            q_mu, q_sigma = utils.split_half(q)
             p_mu = T.constant(0)
             p_sigma = T.constant(1)
         elif self.state == 3:
             q, p = None, inputs[0]
             q_mu = T.constant(0)
             q_sigma = T.constant(1)
-            p_mu, p_sigma = GaussianParameters.get_raw(p)
+            p_mu, p_sigma = utils.split_half(p)
         else:
             raise ValueError("Unreachable state:", self.state)
         if expand:
@@ -446,7 +453,7 @@ class GaussianLikelihood(SKFGNLossLayer):
                 mu = utils.expand_variable(T.flatten(mu, outdim=2), self.repeats[1])
                 sigma = T.constant(1)
             else:
-                mu, sigma = GaussianParameters.get_raw(inputs[1])
+                mu, sigma = utils.split_half(inputs[1])
                 mu = utils.expand_variable(T.flatten(mu, outdim=2), self.repeats[1])
                 sigma = utils.expand_variable(T.flatten(sigma, outdim=2), self.repeats[1])
             if self.path_derivative:
@@ -553,7 +560,7 @@ class GaussianEntropy(SKFGNLossLayer):
 
     def get_outputs_for(self, inputs, **kwargs):
         assert len(inputs) == 1
-        _, sigma = GaussianParameters.get_raw(inputs[0])
+        _, sigma = utils.split_half(inputs[0])
         entropy = T.log(T.constant(2 * np.pi)) / 2.0 + 0.5 + T.log(sigma)
         return T.sum(entropy, axis=1),
 

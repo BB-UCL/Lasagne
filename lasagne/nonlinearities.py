@@ -4,7 +4,7 @@ Non-linear activation functions for artificial neurons.
 """
 
 import theano.tensor
-from .utils import floatX
+from .utils import floatX, split_half
 
 
 # sigmoid
@@ -313,6 +313,23 @@ def softplus(x):
         The output of the softplus function applied to the activation.
     """
     return theano.tensor.nnet.softplus(x)
+
+
+# GaussianParameters
+class GaussianParametrization(object):
+    """Gaussian Parameters
+    """
+    def __init__(self, nonlinearity=softplus, epsilon=1e-6):
+        self.nonlinearity = nonlinearity
+        self.epsilon = epsilon
+
+    def __call__(self, x):
+        mu, pre_sigma = split_half(x, axis=1)
+        sigma = self.nonlinearity(pre_sigma) + self.epsilon
+        return theano.tensor.concatenate((mu, sigma), axis=1)
+
+
+gaussian_parametrization = GaussianParametrization()
 
 
 # linear

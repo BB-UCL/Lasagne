@@ -433,16 +433,22 @@ class Layer(object):
 
     # def serialize(self):
     #     raise NotImplementedError
-    #
-    # @staticmethod
-    # def deserialize(layer):
-    #     raise NotImplementedError
-    #
-    # def base_deserialize(self):
-    #     kwargs = OrderedDict()
-    #     kwargs["name"] = self._name
-    #     kwargs["prefix"] = self._prefix
-    #     kwargs["incomming"] = [l if l is not None else self.input_shapes[i] for i, l in enumerate(self.input_layers)]
+
+    def base_serialize(self):
+        kwargs = OrderedDict()
+        kwargs["type"] = self.__class__.__name__
+        kwargs["name"] = self._name
+        kwargs["prefix"] = self._prefix
+        kwargs["incomming"] = [l if l is not None else self.input_shapes[i] for i, l in enumerate(self.input_layers)]
+        return kwargs
+
+    def base_pretty_print(self, indent=""):
+        incoming = tuple(l.name if l is not None else None for l in self.input_layers)
+        incoming = incoming[0] if len(incoming) == 1 else incoming
+        shape = self.get_output_shape_for(self.input_shapes)
+        print("{}{:<10} {} -> {}".format(indent, self.name, incoming, shape))
+        for k, l in self.inner_layers.items():
+            l.base_pretty_print(indent + "\t")
 
 
 class IndexLayer(Layer):
@@ -467,6 +473,11 @@ class IndexLayer(Layer):
     def get_outputs_for(self, inputs, **kwargs):
         assert len(inputs) == len(self.input_shapes)
         return tuple(inputs[i] for i in self.indexes)
+
+    # def serialize(self):
+    #     kwargs = self.base_serialize()
+    #     kwargs["indexes"] = self.indexes
+    #     return kwargs
 
     # def serialize(self):
     #

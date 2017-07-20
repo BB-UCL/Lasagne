@@ -230,12 +230,13 @@ class SquaredError(SKFGNLossLayer):
 
 class BinaryLogitsCrossEntropy(SKFGNLossLayer):
     """
-    Calculates the binary cross entropy between `output`(x) and `target`(y).
-    The `output`(x) are assumed to be the logits of the Bernoulli distribution.
+    Calculates the binary cross entropy `H(p,q)` between `q(x)` and `p(x)`.
+    The distribution `q(x)` is assumed to be presented as logits.
     Formally computes:
-        - y log(sigmoid(x)) - (1 - y) * log(sigmoid(-x))
+        - p(x) log(q(x)) - (1 - p(x)) * log(q(-x))
+        q(x) = sigmoid(q_logits)
 
-    Note that curvature is propagate only to `output`(x).
+    Note that curvature is propagate only to `q_logits`.
 
     Parameters
     ----------
@@ -251,20 +252,20 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
     y_repeats: int (default: 1)
         If `target` has to be repeated some number of times.
     """
-    def __init__(self, output, target, x_repeats=1, y_repeats=1, *args, **kwargs):
-        super(BinaryLogitsCrossEntropy, self).__init__((output, target),
-                                                       (x_repeats, y_repeats),
+    def __init__(self, q_logits, p, q_repeats=1, p_repeats=1, *args, **kwargs):
+        super(BinaryLogitsCrossEntropy, self).__init__((q_logits, p),
+                                                       (q_repeats, p_repeats),
                                                        max_inputs=2, *args, **kwargs)
 
     def get_outputs_for(self, inputs, **kwargs):
         assert len(inputs) == 2
-        x, y = inputs
-        assert x.ndim == y.ndim
-        x = utils.expand_variable(x, self.repeats[0])
-        y = utils.expand_variable(y, self.repeats[1])
-        p_x = T.nnet.sigmoid(x)
+        q_logits, p = inputs
+        assert q_logits.ndim == p.ndim
+        q_logits = utils.expand_variable(q_logits, self.repeats[0])
+        p = utils.expand_variable(p, self.repeats[1])
+        q = T.nnet.sigmoid(q_logits)
         # Calculate loss
-        bce = T.nnet.binary_crossentropy(p_x, y)
+        bce = T.nnet.binary_crossentropy(q, p)
         # Flatten
         bce = T.flatten(bce, outdim=2)
         # Calculate per data point
@@ -272,26 +273,26 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
         return bce,
 
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
-        x, y = inputs
+        q_logits, p = inputs
         assert len(curvature) == 1
-        p_x = T.nnet.sigmoid(x)
         # hess = p_x * (1 - p_x)
-        hess = T.sqr(T.inv(T.exp(x / 2) + T.exp(- x / 2)))
+        hess = T.sqr(T.inv(T.exp(q_logits / 2) + T.exp(- q_logits / 2)))
         weight = T.sqrt(curvature[0])
         if optimizer.variant == "skfgn-rp":
-            v = optimizer.random_sampler(x.shape)
+            v = optimizer.random_sampler(q_logits.shape)
             cl_v = T.sqrt(hess) * v
             cl_v *= weight
             return cl_v, T.constant(0)
         elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
-            fake_dx = p_x - utils.th_fx(rnd.binary(x.shape, p=p_x))
+            q = T.nnet.sigmoid(q_logits)
+            fake_dx = q - utils.th_fx(rnd.binary(q.shape, p=q))
             fake_dx *= weight
             return fake_dx, T.constant(0)
         elif optimizer.variant == "kfra":
-            if x.ndim == 1:
+            if q_logits.ndim == 1:
                 gn_x = T.diag(hess)
             else:
-                p_x = T.flatten(p_x, outdim=2)
+                hess = T.flatten(hess, outdim=2)
                 gn_x = T.diag(T.mean(hess, axis=0))
             gn_x *= weight**2
             return gn_x, T.constant(0)
@@ -299,11 +300,10 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
             raise ValueError("Unreachable!")
 
     def gauss_newton_product(self, inputs_map, outputs_map, params, variant, v1, v2=None):
-        x, y = inputs_map[self]
-        p_x = T.nnet.sigmoid(x)
+        q_logits, p = inputs_map[self]
         # hess = p_x * (1 - p_x)
-        hess = T.sqr(T.inv(T.exp(x / 2) + T.exp(- x / 2)))
-        return utils.gauss_newton_product(x, hess, params, v1, v2)
+        hess = T.sqr(T.inv(T.exp(q_logits / 2) + T.exp(- q_logits / 2)))
+        return utils.gauss_newton_product(q_logits, hess, params, v1, v2)
 
 
 def bernoulli_logits_ll(output, target,
