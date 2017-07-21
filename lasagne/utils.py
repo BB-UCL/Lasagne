@@ -86,7 +86,7 @@ def as_theano_expression(x):
     Theano symbolic constant
         Theano constant version of `input`.
     """
-    if isinstance(input, theano.gof.Variable):
+    if isinstance(x, theano.gof.Variable):
         return x
     else:
         try:
@@ -94,7 +94,7 @@ def as_theano_expression(x):
         except Exception as e:
             raise TypeError("Input of type %s is not a Theano expression and "
                             "cannot be wrapped as a Theano constant (original "
-                            "exception: %s)" % (type(input), e))
+                            "exception: %s)" % (type(x), e))
 
 
 def collect_shared_vars(expressions):
