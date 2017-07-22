@@ -24,8 +24,8 @@ class SequenceRepeatLayer(Layer):
                                 **this_kwargs)
             inner_layers[i] = layer
         if last_kwargs is not None:
-            this_kwargs = dict(**last_kwargs)
-            this_kwargs.update(kwargs)
+            this_kwargs = dict(**kwargs)
+            this_kwargs.update(last_kwargs)
             layer = layer_class(layer,
                                 name=str(num_repeats + 1),
                                 prefix=prefix,
