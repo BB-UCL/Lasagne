@@ -9,9 +9,10 @@ from functools import wraps
 import numpy as np
 import theano
 import theano.tensor as T
+from theano.tensor.slinalg import solve_lower_triangular, solve_upper_triangular
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from theano.gradient import zero_grad
-from .utils import th_fx, linear_solve
+from .utils import th_fx
 
 _rng = np.random
 
@@ -309,6 +310,11 @@ def matrix_normal(shape, M=None, A=None, B=None, dtype=None, mode="cov"):
     except ValueError:
         n, p = shape[1:]
         single_sample = False
+
+    X = normal(shape, dtype=dtype)
+    if M is None and A is None and B is None:
+        return X
+
     if M is None:
         M = T.zeros((n, p), dtype=dtype)
     if A is None:
@@ -316,17 +322,15 @@ def matrix_normal(shape, M=None, A=None, B=None, dtype=None, mode="cov"):
     if B is None:
         B = T.eye(p)
 
-    X = normal(shape, dtype=dtype)
-    if M is None and A is None and B is None:
-        return X
-
     if single_sample:
         if mode == "cov":
             return M + A.dot(X).dot(B)
         elif mode == "prec":
-            X1 = linear_solve(A, X, A_structure="upper_triangular")
-            X2 = linear_solve(B, X1.T, A_structure="lower_triangular").T
+            X1 = solve_upper_triangular(A, X)
+            X2 = solve_lower_triangular(B, X1.T).T
             return M + X2
+        else:
+            raise ValueError("Illegal mode for matrix normal sampling:", mode)
     else:
         if mode == "prec":
             raise NotImplemented
