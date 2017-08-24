@@ -258,7 +258,7 @@ def binary(shape, p=0.5, v0=0, v1=1, dtype=None, random=None):
         A Theano variable that contains a sample from a binary distribution.
     """
     dtype = dtype or theano.config.floatX
-    if v0 < v1:
+    if v0 > v1:
         v0, v1 = v1, v0
         p = 1 - p
     random = random or RandomStreams(get_rng().randint(1, 2147462579))

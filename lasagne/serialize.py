@@ -121,9 +121,10 @@ def deserialize(object_dict, layers_cache=None, var_cache=None, **kwargs):
         elif "init" in k:
             cls = get_attribute(init, convert_to_camel(v.pop("name")))
             object_dict[k] = cls(**v)
-        elif k == "shape":
+        elif k in ("name", "num_repeats", "units", "indexes", "num_units", "shape"):
             object_dict[k] = deserialize_primitive(v, var_cache)
-        elif k == "num_units":
+        else:
+            print("Using primitive default for key `" + k + "`.")
             object_dict[k] = deserialize_primitive(v, var_cache)
     return layers_cache, var_cache
 
