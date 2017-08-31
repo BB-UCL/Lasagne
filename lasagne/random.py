@@ -302,7 +302,34 @@ def uniform_ball(shape, radius=None, dtype=None, random=None):
 
 
 @multi_sampler
+def multivariate_normal(shape, mu=None, A=None, dtype=None, mode="cov"):
+    """
+    Draws samples from a multivariate normal distribution with full covariance/precition matrix
+    (`normal` only considers diagonal covariance). If mode is cov, A is expected to be the lower
+    triangular square root of the covariance, if mode is prec A is the upper triangular square root of the
+    precision matrix.
+    """
+    dtype = dtype or theano.config.floatX
+    x = normal(shape, dtype=dtype)
+    if A is not None:
+        if mode == "cov":
+            x = A.dot(x)
+        elif mode == "prec":
+            x = solve_upper_triangular(A, x)
+        else:
+            raise ValueError("Illegal Mode '{}'. Must be one of (cov, prec)".format(mode))
+
+    if mu is not None:
+        x += mu
+
+    return x
+
+
+@multi_sampler
 def matrix_normal(shape, M=None, A=None, B=None, dtype=None, mode="cov"):
+    """
+    Draws samples from the matrix normal distribution similar to multivariate_normal
+    """
     dtype = dtype or theano.config.floatX
     try:
         n, p = shape
