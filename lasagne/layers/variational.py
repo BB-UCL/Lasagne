@@ -1,6 +1,6 @@
 import theano
 import theano.tensor as T
-from theano.gradient import zero_grad
+from theano.gradient import disconnected_grad
 import numpy as np
 
 from .base import Layer
@@ -121,9 +121,12 @@ class GaussianSampler(Layer):
         else:
             return out_shape,
 
-    def get_outputs_for(self, inputs, **kwargs):
+    def get_outputs_for(self, inputs, deterministic=False, **kwargs):
         mu, sigma = utils.split_half(inputs[0])
         n, d = mu.shape
+        if deterministic:
+            return mu,
+
         epsilon = normal((n, self.num_samples, d))
         samples = mu.dimshuffle(0, 'x', 1) + sigma.dimshuffle(0, 'x', 1) * epsilon
         samples = T.reshape(samples, (n * self.num_samples, d))
@@ -434,12 +437,14 @@ class GaussianLikelihood(SKFGNLossLayer):
                  *args, **kwargs):
         if p is None:
             incoming = (x, )
+            repeats = (x_repetas, )
             mn = 1
         else:
             incoming = (x, p)
+            repeats = (x_repetas, p_repeats)
             mn = 2
         super(GaussianLikelihood, self).__init__(incoming, max_inputs=mn,
-                                                 repeats=(x_repetas, p_repeats),
+                                                 repeats=repeats,
                                                  *args, **kwargs)
         self.unit_variance = unit_variance
         self.path_derivative = path_derivative
@@ -457,8 +462,8 @@ class GaussianLikelihood(SKFGNLossLayer):
                 mu = utils.expand_variable(T.flatten(mu, outdim=2), self.repeats[1])
                 sigma = utils.expand_variable(T.flatten(sigma, outdim=2), self.repeats[1])
             if self.path_derivative:
-                mu = zero_grad(mu)
-                sigma = zero_grad(sigma)
+                mu = disconnected_grad(mu)
+                sigma = disconnected_grad(sigma)
             log_p_x = - 0.5 * T.log(2 * np.pi)
             log_p_x += - T.log(sigma) - 0.5 * T.sqr((x - mu) / sigma)
         else:
@@ -634,7 +639,7 @@ class IWAEBound(SKFGNLossLayer):
         if self.num_samples == 1 or s1 == 0:
             return s0 + s1,
         s1 = T.reshape(s1, (-1, self.num_samples))
-        m1 = zero_grad(T.max(s1, axis=1))
+        m1 = disconnected_grad(T.max(s1, axis=1))
         s1_cond = s1 - m1.dimshuffle(0, 'x')
         return s0 + m1 + T.log(T.mean(T.exp(s1_cond), axis=1)),
 

@@ -48,10 +48,13 @@ def deserialize_layer(kwargs, layers_cache=None, var_cache=None):
     """
     clc = get_layer_class(kwargs.pop("layer"))
     deserialize(kwargs, layers_cache, var_cache)
-    instance = clc(**kwargs)
-    if layers_cache is not None:
-        add_layer_to_cache(instance, layers_cache)
-    return instance
+    if layers_cache is not None and layers_cache.get(kwargs.get("name", "")) is not None:
+        return layers_cache[kwargs["name"]]
+    else:
+        instance = clc(**kwargs)
+        if layers_cache is not None:
+            add_layer_to_cache(instance, layers_cache)
+        return instance
 
 
 def deserialize_nonlinearity(input_dict):
@@ -109,7 +112,7 @@ def deserialize(object_dict, layers_cache=None, var_cache=None, **kwargs):
                 object_dict[k] = deserialize_layer(v, layers_cache, var_cache)
         elif k == "last_kwargs":
             deserialize(v, layers_cache, var_cache)
-        elif k in ("q", "q_logits", "p"):
+        elif k in ("q", "q_logits", "p", "x", "y"):
             if isinstance(v, str):
                 object_dict[k] = layers_cache[v]
             else:

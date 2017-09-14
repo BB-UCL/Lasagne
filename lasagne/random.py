@@ -11,7 +11,7 @@ import theano
 import theano.tensor as T
 from theano.tensor.slinalg import solve_lower_triangular, solve_upper_triangular
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
-from theano.gradient import zero_grad
+from theano.gradient import disconnected_grad
 from .utils import th_fx
 
 _rng = np.random
@@ -163,7 +163,7 @@ def uniform(shape, min=0, max=1, dtype=None, random=None):
     dtype = dtype or theano.config.floatX
     random = random or RandomStreams(get_rng().randint(1, 2147462579))
     samples = random.uniform(shape, dtype=dtype)
-    samples = zero_grad(samples)
+    samples = disconnected_grad(samples)
     if min != 0 or max != 1:
         samples *= (max - min)
         samples += min
@@ -196,7 +196,7 @@ def normal(shape, mean=0, std=1, dtype=None, random=None):
     dtype = dtype or theano.config.floatX
     random = random or RandomStreams(get_rng().randint(1, 2147462579))
     samples = random.normal(shape, dtype=dtype)
-    samples = zero_grad(samples)
+    samples = disconnected_grad(samples)
     if std != 1:
         samples *= std
     if mean != 0:
@@ -263,7 +263,7 @@ def binary(shape, p=0.5, v0=0, v1=1, dtype=None, random=None):
         p = 1 - p
     random = random or RandomStreams(get_rng().randint(1, 2147462579))
     samples = random.binomial(shape, p=p, dtype=dtype)
-    samples = zero_grad(samples)
+    samples = disconnected_grad(samples)
     if v0 != 0 or v1 != 1:
         samples *= v1 - v0
         samples += v0
