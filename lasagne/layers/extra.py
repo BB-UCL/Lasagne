@@ -33,7 +33,7 @@ class SequenceRepeatLayer(Layer):
             inner_layers[num_repeats] = layer
         super(SequenceRepeatLayer, self).__init__(
             incoming, inner_layers=inner_layers,
-            name=name, prefix=prefix,
+            name=name, prefix=prefix, max_inputs=10,
             **kwargs)
 
     def get_output_shapes_for(self, input_shapes):

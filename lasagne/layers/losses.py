@@ -181,8 +181,8 @@ class SquaredError(SKFGNLossLayer):
         assert len(inputs) == 2
         x, y = inputs
         assert x.ndim == y.ndim
-        x = T.flatten(x, outdim=2) if x.ndim > 2 else x
-        y = T.flatten(y, outdim=2) if y.ndim > 2 else y
+        x = T.flatten(x, ndim=2) if x.ndim > 2 else x
+        y = T.flatten(y, ndim=2) if y.ndim > 2 else y
         x = utils.expand_variable(x, self.repeats[0])
         y = utils.expand_variable(y, self.repeats[1])
         if x.ndim == 1:
@@ -211,8 +211,8 @@ class SquaredError(SKFGNLossLayer):
                 gn_x = weight
                 gn_y = weight
             elif x.ndim == 2:
-                x = T.flatten(x, outdim=2)
-                y = T.flatten(y, outdim=2)
+                x = T.flatten(x, ndim=2)
+                y = T.flatten(y, ndim=2)
                 gn_x = T.eye(x.shape[1])
                 gn_x *= weight**2
                 gn_y = T.eye(y.shape[1])
@@ -267,7 +267,7 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
         # Calculate loss
         bce = T.nnet.binary_crossentropy(q, p)
         # Flatten
-        bce = T.flatten(bce, outdim=2)
+        bce = T.flatten(bce, ndim=2)
         # Calculate per data point
         bce = T.sum(bce, axis=1)
         return bce,
@@ -292,7 +292,7 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
             if q_logits.ndim == 1:
                 gn_x = T.diag(hess)
             else:
-                hess = T.flatten(hess, outdim=2)
+                hess = T.flatten(hess, ndim=2)
                 gn_x = T.diag(T.mean(hess, axis=0))
             gn_x *= weight**2
             return gn_x, T.constant(0)
@@ -347,7 +347,7 @@ class CategoricalLogitsCrossEntropy(SKFGNLossLayer):
         assert len(inputs) == 2
         x, y = inputs
         if x.ndim != 2:
-            x = T.flatten(x, outdim=2)
+            x = T.flatten(x, ndim=2)
         x = utils.expand_variable(x, self.repeats[0])
         y = utils.expand_variable(y, self.repeats[1])
         p_x = T.nnet.softmax(x)
@@ -361,7 +361,7 @@ class CategoricalLogitsCrossEntropy(SKFGNLossLayer):
         assert len(curvature) == 1
         weight = curvature[0]
         if x.ndim != 2:
-            p_x = T.nnet.softmax(T.flatten(x, outdim=2))
+            p_x = T.nnet.softmax(T.flatten(x, ndim=2))
         else:
             p_x = T.nnet.softmax(x)
         if optimizer.variant == "skfgn-rp":
@@ -462,7 +462,7 @@ class BetaCrossEntropy(SKFGNLossLayer):
         # Add the beta function values
         loss += T.gammaln(alpha) + T.gammaln(beta) - T.gammaln(alpha + beta)
         # Flatten
-        loss = T.flatten(loss, outdim=2)
+        loss = T.flatten(loss, ndim=2)
         # Calculate per data point
         loss = T.sum(loss, axis=1)
         return loss,

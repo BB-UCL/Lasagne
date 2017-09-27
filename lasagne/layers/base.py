@@ -445,10 +445,15 @@ class Layer(object):
     def base_pretty_print(self, indent=""):
         incoming = tuple(l.name if l is not None else None for l in self.input_layers)
         incoming = incoming[0] if len(incoming) == 1 else incoming
-        shape = self.get_output_shape_for(self.input_shapes)
-        print("{}{:<10} {} -> {}".format(indent, self.name, incoming, shape))
-        for k, l in self.inner_layers.items():
-            l.base_pretty_print(indent + "\t")
+        shape = self.get_output_shapes_for(self.input_shapes)
+        if len(shape) == 1:
+            print("{}{:<10} {} -> {}".format(indent, self.name, incoming, shape[0]))
+            for k, l in self.inner_layers.items():
+                l.base_pretty_print(indent + "\t")
+        elif len(shape) == 2:
+            print("{}{:<10} {} -> {}, {}".format(indent, self.name, incoming, shape[0], shape[1]))
+            for k, l in self.inner_layers.items():
+                l.base_pretty_print(indent + "\t")
 
 
 class IndexLayer(Layer):

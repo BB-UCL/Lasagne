@@ -365,3 +365,34 @@ class Orthogonal(Initializer):
         q = u if u.shape == flat_shape else v
         q = q.reshape(shape)
         return floatX(self.gain * q)
+
+
+class Identity(Initializer):
+    """
+    Intialize weights as Identity matrix plus small noise
+    """
+    def __init__(self, initializer, gain=0.001):
+        self.initializer = initializer
+        self.gain = gain
+
+    def sample(self, shape):
+        assert len(shape) == 2
+        identity = floatX(np.eye(*shape))
+        return self.initializer(std=self.gain).sample(shape) + identity
+
+
+class IdentityNormal(Identity):
+    """
+    See :class:`Indetity` for a description of the parameters.
+    """
+    def __init__(self, gain=0.001):
+        super(IdentityNormal, self).__init__(Normal, gain)
+
+
+class IdentityUniform(Identity):
+    """
+
+    See :class:`Indetity` for a description of the parameters.
+    """
+    def __init__(self, gain=0.001):
+        super(IdentityUniform, self).__init__(Uniform, gain)

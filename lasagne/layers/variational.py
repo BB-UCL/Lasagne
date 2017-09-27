@@ -161,7 +161,7 @@ class GaussianSampler(Layer):
                 epsilon = sigma_eps.owner.inputs[0]
             if not isinstance(epsilon.owner.op, theano.gradient.ZeroGrad):
                 raise ValueError("Something is wrong with getting epsilon.")
-            flat_epsilon = T.flatten(epsilon, outdim=2)
+            flat_epsilon = T.flatten(epsilon, ndim=2)
             nk = utils.th_fx(epsilon.shape[0])
             ge = T.tile(curvature[0], (2, 2))
             eps_extended = T.concatenate((T.ones_like(flat_epsilon), flat_epsilon), axis=1)
@@ -262,7 +262,7 @@ class GaussianKL(SKFGNLossLayer):
         # Log determinant of q_sigma
         kl -= 2 * T.log(q_sigma)
         # Flatten
-        kl = T.flatten(kl, outdim=2)
+        kl = T.flatten(kl, ndim=2)
         # Calculate per data point
         kl = 0.5 * T.sum(kl, axis=1)
         return kl,
@@ -451,16 +451,16 @@ class GaussianLikelihood(SKFGNLossLayer):
 
     def get_outputs_for(self, inputs, **kwargs):
         x = utils.expand_variable(inputs[0], self.repeats[0])
-        x = T.flatten(x, outdim=2)
+        x = T.flatten(x, ndim=2)
         if len(inputs) == 2:
             if self.unit_variance:
                 mu = inputs[1]
-                mu = utils.expand_variable(T.flatten(mu, outdim=2), self.repeats[1])
+                mu = utils.expand_variable(T.flatten(mu, ndim=2), self.repeats[1])
                 sigma = T.constant(1)
             else:
                 mu, sigma = utils.split_half(inputs[1])
-                mu = utils.expand_variable(T.flatten(mu, outdim=2), self.repeats[1])
-                sigma = utils.expand_variable(T.flatten(sigma, outdim=2), self.repeats[1])
+                mu = utils.expand_variable(T.flatten(mu, ndim=2), self.repeats[1])
+                sigma = utils.expand_variable(T.flatten(sigma, ndim=2), self.repeats[1])
             if self.path_derivative:
                 mu = disconnected_grad(mu)
                 sigma = disconnected_grad(sigma)
@@ -493,10 +493,10 @@ class GaussianLikelihood(SKFGNLossLayer):
                         gn_x = weight**2
                         gn_mu = weight**2
                     elif x.ndim == 2:
-                        x = T.flatten(x, outdim=2)
+                        x = T.flatten(x, ndim=2)
                         gn_x = T.eye(x.shape[1])
                         gn_x *= weight**2
-                        mu = T.flatten(mu, outdim=2)
+                        mu = T.flatten(mu, ndim=2)
                         gn_mu = T.eye(mu.shape[1])
                         gn_mu *= weight**2
                     else:
@@ -521,7 +521,7 @@ class GaussianLikelihood(SKFGNLossLayer):
                 if x.ndim == 1:
                     gn_x = weight**2
                 elif x.ndim == 2:
-                    x = T.flatten(x, outdim=2)
+                    x = T.flatten(x, ndim=2)
                     gn_x = T.eye(x.shape[1])
                     gn_x *= weight**2
                 else:

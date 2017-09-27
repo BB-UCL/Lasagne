@@ -128,7 +128,7 @@ class DenseLayer(Layer):
             self.W = self.add_param(W, (num_inputs, num_units), name="W",
                                     broadcast_unit_dims=False)
             self.b = self.add_param(b, (num_units,), name="b",
-                                    regularizable=False)
+                                    broadcast_unit_dims=False, regularizable=False)
             self.W_fused = None
 
     def get_output_shapes_for(self, input_shapes):

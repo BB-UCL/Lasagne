@@ -414,7 +414,7 @@ def gamma(alpha, dtype=None, max_samples=5):
     http://dl.acm.org/citation.cfm?id=358414
 
     """
-    alpha_flat = T.flatten(alpha, outdim=1)
+    alpha_flat = T.flatten(alpha, ndim=1)
     shape = (alpha_flat.shape[0], max_samples)
     d = alpha_flat - T.constant(1.0 / 3.0)
     c = T.inv(T.sqrt(9 * d))

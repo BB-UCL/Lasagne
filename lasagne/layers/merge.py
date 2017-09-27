@@ -384,15 +384,15 @@ class ElemwiseSumLayer(ElemwiseMergeLayer):
     of the same number of output units and add them up afterwards. (This avoids
     the copy operations in concatenation, but splits up the dot product.)
     """
-    def __init__(self, incomings, coeffs=1, cropping=None, **kwargs):
-        super(ElemwiseSumLayer, self).__init__(incomings, T.add,
+    def __init__(self, incoming, coeffs=1, cropping=None, **kwargs):
+        super(ElemwiseSumLayer, self).__init__(incoming, T.add,
                                                cropping=cropping, **kwargs)
         if isinstance(coeffs, list):
-            if len(coeffs) != len(incomings):
-                raise ValueError("Mismatch: got %d coeffs for %d incomings" %
-                                 (len(coeffs), len(incomings)))
+            if len(coeffs) != len(incoming):
+                raise ValueError("Mismatch: got %d coeffs for %d incoming" %
+                                 (len(coeffs), len(incoming)))
         else:
-            coeffs = [coeffs] * len(incomings)
+            coeffs = [coeffs] * len(incoming)
 
         self.coeffs = coeffs
 

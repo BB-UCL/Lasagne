@@ -57,7 +57,7 @@ class FlattenLayer(Layer):
         return input_shape[:self.outdim - 1] + (flattened,),
 
     def get_outputs_for(self, inputs, **kwargs):
-        return inputs[0].flatten(self.outdim),
+        return T.flatten(inputs[0], ndim=self.outdim),
 
 flatten = FlattenLayer  # shortcut
 
