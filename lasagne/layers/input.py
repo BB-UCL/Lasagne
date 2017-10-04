@@ -73,5 +73,3 @@ class InputLayer(Layer):
 
     def base_pretty_print(self, indent=""):
         print("{}{:<10} {}".format(indent, self.name, self.shape))
-        for l in self.inner_layers:
-            l.base_pretty_print(indent + "\t")

@@ -67,7 +67,7 @@ class Layer(object):
 
         self.max_inputs = max_inputs
         self.num_outputs = num_outputs
-        self.inner_layers = dict() if inner_layers is None else inner_layers
+        self.inner_layers = inner_layers
         self._name = name
         self._prefix = prefix
         self.params = OrderedDict()
@@ -166,8 +166,9 @@ class Layer(object):
 
         if unwrap_shared:
             result = utils.collect_shared_vars(result)
+
         # Add all of the inner layers parameters
-        for l in self.inner_layers.values():
+        for l in self.inner_iter:
             result += l.get_params(unwrap_shared=unwrap_shared, **tags)
         return result
 
@@ -328,7 +329,7 @@ class Layer(object):
             prefix = self._prefix
         else:
             prefix = self._prefix + SCOPE_DELIMITER + self._name
-        for l in self.inner_layers.values():
+        for l in self.inner_iter:
             l.prefix = prefix
         for p in self.params:
             base = p.name.split(SCOPE_DELIMITER)[-1]
@@ -342,6 +343,20 @@ class Layer(object):
     def prefix(self, value):
         self._prefix = value
         self.name = self._name
+
+    @property
+    def inner_iter(self):
+        if self.inner_layers is not None:
+            if isinstance(self.inner_layers, Layer):
+                yield self.inner_layers
+            elif isinstance(self.inner_layers, (list, tuple)):
+                for l in self.inner_layers:
+                    yield l
+            elif isinstance(self.inner_layers, dict):
+                for l in self.inner_layers.values():
+                    yield l
+            else:
+                raise ValueError("`inner_layers` must be either dict, list, tuple or Layer")
 
     def curvature_propagation(self, optimizer, inputs, outputs, curvature, make_matrix):
         """
@@ -448,11 +463,11 @@ class Layer(object):
         shape = self.get_output_shapes_for(self.input_shapes)
         if len(shape) == 1:
             print("{}{:<10} {} -> {}".format(indent, self.name, incoming, shape[0]))
-            for k, l in self.inner_layers.items():
+            for l in self.inner_iter:
                 l.base_pretty_print(indent + "\t")
         elif len(shape) == 2:
             print("{}{:<10} {} -> {}, {}".format(indent, self.name, incoming, shape[0], shape[1]))
-            for k, l in self.inner_layers.items():
+            for l in self.inner_iter:
                 l.base_pretty_print(indent + "\t")
 
 

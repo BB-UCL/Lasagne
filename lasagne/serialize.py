@@ -34,7 +34,7 @@ def get_attribute(main_module, name, extra_modules=None):
 
 def add_layer_to_cache(layer, layers_cache):
     layers_cache[layer.name] = layer
-    for l in layer.inner_layers.values():
+    for l in layer.inner_iter:
         add_layer_to_cache(l, layers_cache)
 
 

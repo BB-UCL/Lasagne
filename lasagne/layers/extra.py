@@ -13,7 +13,7 @@ class SequenceRepeatLayer(Layer):
                  **kwargs):
         for k, v in varying_kwargs.items():
             assert len(v) == num_repeats
-        inner_layers = dict()
+        inner_layers = list()
         layer = incoming
         for i in range(num_repeats):
             this_kwargs = dict((k, v[i]) for k, v in varying_kwargs.items())
@@ -22,7 +22,7 @@ class SequenceRepeatLayer(Layer):
                                 name=str(i+1),
                                 prefix=prefix,
                                 **this_kwargs)
-            inner_layers[i] = layer
+            inner_layers.append(layer)
         if last_kwargs is not None:
             this_kwargs = dict(**kwargs)
             this_kwargs.update(last_kwargs)
@@ -30,21 +30,19 @@ class SequenceRepeatLayer(Layer):
                                 name=str(num_repeats + 1),
                                 prefix=prefix,
                                 **this_kwargs)
-            inner_layers[num_repeats] = layer
+            inner_layers.append(layer)
         super(SequenceRepeatLayer, self).__init__(
             incoming, inner_layers=inner_layers,
             name=name, prefix=prefix, max_inputs=10,
             **kwargs)
 
     def get_output_shapes_for(self, input_shapes):
-        for i in range(len(self.inner_layers)):
-            l = self.inner_layers[i]
+        for l in self.inner_iter:
             input_shapes = l.get_output_shapes_for(input_shapes)
         return input_shapes
 
     def get_outputs_for(self, inputs, **kwargs):
-        for i in range(len(self.inner_layers)):
-            l = self.inner_layers[i]
+        for l in self.inner_iter:
             inputs = l.get_outputs_for(inputs, **kwargs)
         return inputs
 
