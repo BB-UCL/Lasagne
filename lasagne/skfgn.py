@@ -470,7 +470,7 @@ class Optimizer(object):
                                      name=name)
                 elif b_dim is None:
                     mat = SqrtMatrix(a_dim, a_sqrt,
-                                     n_a=n,
+                                     n=n_a,
                                      layer=owning_layer, params=params,
                                      k=0.0,
                                      init_k=self.tikhonov_damping,
@@ -478,12 +478,14 @@ class Optimizer(object):
                                      name=name)
                 else:
                     a_factor = SqrtMatrix(a_dim, a_sqrt,
+                                          n=n_a,
                                           layer=owning_layer, params=params,
                                           k=0.0,
                                           init_k=self.tikhonov_damping,
                                           update_fn=self.curvature_avg,
                                           name=name + "kf_a")
                     b_factor = SqrtMatrix(b_dim, b_sqrt,
+                                          n=n_b,
                                           layer=owning_layer, params=params,
                                           k=0.0,
                                           init_k=self.tikhonov_damping,

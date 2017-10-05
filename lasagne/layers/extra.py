@@ -52,12 +52,12 @@ class SequenceRepeatLayer(Layer):
 
 
 class DenseStackLayer(SequenceRepeatLayer):
-    def __init__(self, incoming, units, num_repeats=None, *args, **kwargs):
+    def __init__(self, incoming, num_units, num_repeats=None, *args, **kwargs):
         if num_repeats is None:
-            assert isinstance(units, (tuple, list))
-            num_repeats = len(units)
-        elif isinstance(units, int):
-            units = [units for _ in range(num_repeats)]
-        varying_kwargs = dict(num_units=units)
+            assert isinstance(num_units, (tuple, list))
+            num_repeats = len(num_units)
+        elif isinstance(num_units, int):
+            num_units = [num_units for _ in range(num_repeats)]
+        varying_kwargs = dict(num_units=num_units)
         super(DenseStackLayer, self).__init__(
             incoming, num_repeats, DenseLayer, varying_kwargs, *args, **kwargs)
