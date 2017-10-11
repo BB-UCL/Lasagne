@@ -3,6 +3,7 @@ from warnings import warn
 
 import theano.tensor as T
 
+from .helper import get_outputs, get_all_layers
 from .. import utils
 from ..utils import SCOPE_DELIMITER
 
@@ -469,6 +470,23 @@ class Layer(object):
             print("{}{:<10} {} -> {}, {}".format(indent, self.name, incoming, shape[0], shape[1]))
             for l in self.inner_iter:
                 l.base_pretty_print(indent + "\t")
+
+    def __call__(self, *args, **kwargs):
+        assert len(args) < 2
+        if len(args) == 0:
+            layers = {l.name: l for l in get_all_layers(self)}
+            inputs = {layers[k]: v for k, v in kwargs.items() if layers.get(k) is not None}
+            kwargs = dict(filter(lambda pair: layers.get(pair[0]) is None, kwargs.items()))
+            for k in inputs.keys():
+                if layers.get(k) is not None:
+                    kwargs.pop(k)
+            outs = get_outputs(self, inputs=inputs, **kwargs)
+        else:
+            outs = get_outputs(self, inputs=args[0], **kwargs)
+        if len(outs) == 1:
+            return outs[0]
+        else:
+            return outs
 
 
 class IndexLayer(Layer):

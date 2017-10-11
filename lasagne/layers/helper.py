@@ -22,7 +22,7 @@ __all__ = [
 ]
 
 
-def get_all_layers(layer, treat_as_input=None):
+def get_all_layers(layer, treat_as_input=None, replace=None):
     """
     This function gathers all layers below one or more given :class:`Layer`
     instances, including the given layer(s). Its main use is to collect all
@@ -42,6 +42,10 @@ def get_all_layers(layer, treat_as_input=None):
         list, but their incoming layers will not be collected (unless they
         are required for other layers as well).
 
+    replace: None or dictionary
+        a dictionary of :class:`Layer` to :class:`Layer`. This essentially
+        replaces any of the keys by the values and fetches their dependencies
+        instead.
     Returns
     -------
     list
@@ -77,6 +81,8 @@ def get_all_layers(layer, treat_as_input=None):
     seen = set()
     done = set()
     result = []
+    replace = replace if replace is not None else dict()
+    seen.update(replace.keys())
 
     # If treat_as_input is given, we pretend we've already collected all their
     # incoming layers.
@@ -95,7 +101,9 @@ def get_all_layers(layer, treat_as_input=None):
             # be appended to the result list in the next iteration.
             seen.add(layer)
             if hasattr(layer, 'input_layers'):
-                queue.extendleft(reversed(layer.input_layers))
+                # Replace any of the inputs with its correct replacement
+                in_layers = reversed([replace.get(l, l) for l in layer.input_layers])
+                queue.extendleft(in_layers)
         else:
             # We've been here before: Either we've finished all its incomings,
             # or we've detected a cycle. In both cases, we remove the layer
@@ -159,11 +167,19 @@ def get_outputs(layer_or_layers, inputs=None, get_maps=False, **kwargs):
     both, while the latter will use two different dropout masks.
     """
     from .input import InputLayer
+    from .base import Layer
     # track accepted kwargs used by get_output_for
     accepted_kwargs = {'deterministic'}
     # obtain topological ordering of all layers the output layer(s) depend on
+    # Any inputs mapping to a Layer are placed in the replacement dict
+    replace = dict()
+    for k, v in inputs.items():
+        if isinstance(v, Layer):
+            replace[k] = v
+    for k in replace.keys():
+        inputs.pop(k)
     treat_as_input = inputs.keys() if isinstance(inputs, dict) else []
-    all_layers = get_all_layers(layer_or_layers, treat_as_input)
+    all_layers = get_all_layers(layer_or_layers, treat_as_input, replace)
     # initialize layer-to-expression mapping from all input layers
     all_outputs = dict((layer, (layer.input_var, ))
                        for layer in all_layers
@@ -188,6 +204,8 @@ def get_outputs(layer_or_layers, inputs=None, get_maps=False, **kwargs):
             try:
                 layer_inputs = ()
                 for input_layer in layer.input_layers:
+                    # We use the replacement dict whenever needed
+                    input_layer = replace.get(input_layer, input_layer)
                     layer_inputs += all_outputs[input_layer]
             except KeyError:
                 # one of the input_layer attributes must have been `None`
