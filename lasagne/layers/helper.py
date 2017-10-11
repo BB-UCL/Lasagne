@@ -173,12 +173,14 @@ def get_outputs(layer_or_layers, inputs=None, get_maps=False, **kwargs):
     # obtain topological ordering of all layers the output layer(s) depend on
     # Any inputs mapping to a Layer are placed in the replacement dict
     replace = dict()
-    for k, v in inputs.items():
-        if isinstance(v, Layer):
-            replace[k] = v
-    for k in replace.keys():
-        inputs.pop(k)
-    treat_as_input = inputs.keys() if isinstance(inputs, dict) else []
+    treat_as_input = list()
+    if isinstance(inputs, dict):
+        for k, v in inputs.items():
+            if isinstance(v, Layer):
+                replace[k] = v
+        for k in replace.keys():
+            inputs.pop(k)
+        treat_as_input = inputs.keys()
     all_layers = get_all_layers(layer_or_layers, treat_as_input, replace)
     # initialize layer-to-expression mapping from all input layers
     all_outputs = dict((layer, (layer.input_var, ))
