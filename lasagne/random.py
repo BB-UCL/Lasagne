@@ -162,6 +162,8 @@ def uniform(shape, min=0, max=1, dtype=None, random=None):
     """
     dtype = dtype or theano.config.floatX
     random = random or RandomStreams(get_rng().randint(1, 2147462579))
+    # !! This is needed because theano otherwise fails for things like [10, x.shape[0]]
+    shape = tuple(s for s in shape)
     samples = random.uniform(shape, dtype=dtype)
     samples = disconnected_grad(samples)
     if min != 0 or max != 1:

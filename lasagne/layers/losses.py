@@ -122,6 +122,7 @@ class SumLosses(SKFGNLossLayer):
 
     def get_outputs_for(self, inputs, **kwargs):
         assert len(inputs) == len(self.weights)
+        inputs = (T.sum(T.flatten(i, ndim=2), axis=1) if i.ndim > 1 else i for i in inputs)
         if self.mode == "merge":
             return sum(utils.expand_variable(i, r) * w for i, w, r in
                        zip(inputs, self.weights, self.repeats)),

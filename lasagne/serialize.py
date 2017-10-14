@@ -47,7 +47,7 @@ def deserialize_layer(kwargs, layers_cache=None, var_cache=None):
     :return:
     """
     clc = get_layer_class(kwargs.pop("layer"))
-    deserialize(kwargs, layers_cache, var_cache)
+    deserialize_stub(kwargs, layers_cache, var_cache)
     if layers_cache is not None and layers_cache.get(kwargs.get("name", "")) is not None:
         return layers_cache[kwargs["name"]]
     else:
@@ -90,7 +90,20 @@ def deserialize_primitive(value, var_cache=None):
         return value
 
 
-def deserialize(object_dict, layers_cache=None, var_cache=None, **kwargs):
+def deserialize(object_dict, layers_cache=None, var_cache=None, return_only_new=True, **kwargs):
+    old_layers_cache = dict(layers_cache.items()) if layers_cache is not None else dict()
+    for k, v in kwargs.items():
+        if isinstance(v, layers.Layer):
+            old_layers_cache[k] = v
+    layers_cache, var_cache = deserialize_stub(object_dict, layers_cache, var_cache, **kwargs)
+    if return_only_new:
+        for k, v in old_layers_cache.items():
+            if layers_cache[k] == v:
+                layers_cache.pop(k)
+    return layers_cache, var_cache
+
+
+def deserialize_stub(object_dict, layers_cache=None, var_cache=None, **kwargs):
     layers_cache = layers_cache if layers_cache else OrderedDict()
     var_cache = var_cache if var_cache else OrderedDict()
     for k, v in kwargs.items():
@@ -111,7 +124,7 @@ def deserialize(object_dict, layers_cache=None, var_cache=None, **kwargs):
             else:
                 object_dict[k] = deserialize_layer(v, layers_cache, var_cache)
         elif k == "last_kwargs":
-            deserialize(v, layers_cache, var_cache)
+            deserialize_stub(v, layers_cache, var_cache)
         elif k in ("q", "q_logits", "p", "x", "y"):
             if isinstance(v, str):
                 object_dict[k] = layers_cache[v]
