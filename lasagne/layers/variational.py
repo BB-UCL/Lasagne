@@ -433,8 +433,8 @@ class GaussianLikelihood(SKFGNLossLayer):
         PathDerivative rather than the usual estimator.
     """
     def __init__(self, x, p=None, x_repetas=1, p_repeats=1,
-                 unit_variance=False, path_derivative=False,
-                 *args, **kwargs):
+                 zero_mean=False, unit_variance=False,
+                 path_derivative=False, *args, **kwargs):
         if p is None:
             incoming = (x, )
             repeats = (x_repetas, )
@@ -446,6 +446,7 @@ class GaussianLikelihood(SKFGNLossLayer):
         super(GaussianLikelihood, self).__init__(incoming, max_inputs=mn,
                                                  repeats=repeats,
                                                  *args, **kwargs)
+        self.zero_mean = zero_mean
         self.unit_variance = unit_variance
         self.path_derivative = path_derivative
 
@@ -453,14 +454,28 @@ class GaussianLikelihood(SKFGNLossLayer):
         x = utils.expand_variable(inputs[0], self.repeats[0])
         x = T.flatten(x, ndim=2)
         if len(inputs) == 2:
-            if self.unit_variance:
-                mu = inputs[1]
-                mu = utils.expand_variable(T.flatten(mu, ndim=2), self.repeats[1])
+            if self.zero_mean:
+                mu = T.constant(0)
+                sigma = inputs[1]
+                if sigma.ndim == 1:
+                    sigma = sigma.dimshuffle('x', 0)
+                else:
+                    sigma = utils.expand_variable(T.flatten(sigma, ndim=2), self.repeats[1])
+            elif self.unit_variance:
                 sigma = T.constant(1)
+                mu = inputs[1]
+                if mu.ndim == 1:
+                    mu = mu.dimshuffle('x', 0)
+                else:
+                    mu = utils.expand_variable(T.flatten(mu, ndim=2), self.repeats[1])
             else:
                 mu, sigma = utils.split_half(inputs[1])
-                mu = utils.expand_variable(T.flatten(mu, ndim=2), self.repeats[1])
-                sigma = utils.expand_variable(T.flatten(sigma, ndim=2), self.repeats[1])
+                if mu.ndim == 1:
+                    mu = mu.dimshuffle('x', 0)
+                    sigma = sigma.dimshuffle('x', 0)
+                else:
+                    mu = utils.expand_variable(T.flatten(mu, ndim=2), self.repeats[1])
+                    sigma = utils.expand_variable(T.flatten(sigma, ndim=2), self.repeats[1])
             if self.path_derivative:
                 mu = disconnected_grad(mu)
                 sigma = disconnected_grad(sigma)

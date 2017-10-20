@@ -1022,8 +1022,9 @@ def layer_norm_tensor(tensor, gamma, beta, axes='auto', epsilon=1e-4):
     return normalized * gamma + beta
 
 
-def split_half(x, axis=1):
+def split_half(x, axis=-1):
         d = T.int_div(x.shape[axis], 2)
+        axis = x.ndim + axis if axis < 0 else axis
         if axis == 0:
             return x[:d], x[d:]
         elif axis == 1:

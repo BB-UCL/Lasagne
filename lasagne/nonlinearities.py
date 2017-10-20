@@ -324,9 +324,9 @@ class GaussianParametrization(object):
         self.epsilon = epsilon
 
     def __call__(self, x):
-        mu, pre_sigma = split_half(x, axis=1)
+        mu, pre_sigma = split_half(x, axis=-1)
         sigma = self.nonlinearity(pre_sigma) + self.epsilon
-        return theano.tensor.concatenate((mu, sigma), axis=1)
+        return theano.tensor.concatenate((mu, sigma), axis=-1)
 
 
 gaussian_parametrization = GaussianParametrization()

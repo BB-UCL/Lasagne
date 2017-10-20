@@ -8,6 +8,7 @@ from .base import Layer
 
 __all__ = [
     "InputLayer",
+    "ParameterLayer"
 ]
 
 
@@ -70,6 +71,25 @@ class InputLayer(Layer):
     @Layer.output_shapes.getter
     def output_shapes(self):
         return self.shape,
+
+    def base_pretty_print(self, indent=""):
+        print("{}{:<10} {}".format(indent, self.name, self.shape))
+
+
+class ParameterLayer(Layer):
+    def __init__(self, init_value, dtype=None, **kwargs):
+        super(ParameterLayer, self).__init__((), max_inputs=0, **kwargs)
+        dtype = theano.config.floatX if dtype is None else dtype
+        self.p = self.add_param(init_value.astype(dtype), init_value.shape, name="param")
+
+
+    @Layer.output_shapes.getter
+    def output_shapes(self):
+        return self.p.get_value().shape,
+
+    def get_outputs_for(self, inputs, **kwargs):
+        assert len(inputs) == 0
+        return self.p,
 
     def base_pretty_print(self, indent=""):
         print("{}{:<10} {}".format(indent, self.name, self.shape))
