@@ -264,9 +264,8 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
         assert q_logits.ndim == p.ndim
         q_logits = utils.expand_variable(q_logits, self.repeats[0])
         p = utils.expand_variable(p, self.repeats[1])
-        q = T.nnet.sigmoid(q_logits)
         # Calculate loss
-        bce = T.nnet.binary_crossentropy(q, p)
+        bce = p * T.nnet.softplus(-q_logits) + (1 - p) * T.nnet.softplus(q_logits)
         # Flatten
         bce = T.flatten(bce, ndim=2)
         # Calculate per data point
