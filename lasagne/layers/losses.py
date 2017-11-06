@@ -265,7 +265,8 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
         q_logits = utils.expand_variable(q_logits, self.repeats[0])
         p = utils.expand_variable(p, self.repeats[1])
         # Calculate loss
-        bce = p * T.nnet.softplus(-q_logits) + (1 - p) * T.nnet.softplus(q_logits)
+        bce = T.nnet.softplus(q_logits) - p * q_logits
+        # bce = p * T.nnet.softplus(-q_logits) + (1 - p) * T.nnet.softplus(q_logits)
         # Flatten
         bce = T.flatten(bce, ndim=2)
         # Calculate per data point
@@ -282,12 +283,12 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
             v = optimizer.random_sampler(q_logits.shape)
             cl_v = T.sqrt(hess) * v
             cl_v *= weight
-            return cl_v, T.constant(0)
-        elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
+            return cl_v, T.constant(0.0)
+        elif optimizer.variant in ("skfgn-fisher", "skfgn-power", "skfgn-cg", "kfac*", "kfac_star"):
             q = T.nnet.sigmoid(q_logits)
             fake_dx = q - utils.th_fx(rnd.binary(q.shape, p=q))
             fake_dx *= weight
-            return fake_dx, T.constant(0)
+            return fake_dx, T.constant(0.0)
         elif optimizer.variant == "kfra":
             if q_logits.ndim == 1:
                 gn_x = T.diag(hess)
@@ -295,7 +296,7 @@ class BinaryLogitsCrossEntropy(SKFGNLossLayer):
                 hess = T.flatten(hess, ndim=2)
                 gn_x = T.diag(T.mean(hess, axis=0))
             gn_x *= weight**2
-            return gn_x, T.constant(0)
+            return gn_x, T.constant(0.0)
         else:
             raise ValueError("Unreachable!")
 
@@ -371,7 +372,7 @@ class CategoricalLogitsCrossEntropy(SKFGNLossLayer):
             if x.ndim != 2:
                 cl_v = T.reshape(cl_v, x.shape)
             return cl_v, T.zeros_like(y)
-        elif optimizer.variant == "skfgn-fisher" or optimizer.variant == "kfac*":
+        elif optimizer.variant in ("skfgn-fisher", "skfgn-power", "kfac*", "kfac_star"):
             fake_dx = p_x - utils.th_fx(rnd.multinomial(x.shape, pvals=p_x))
             fake_dx *= T.sqrt(weight)
             if x.ndim != 2:

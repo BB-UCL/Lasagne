@@ -105,7 +105,7 @@ def multi_sampler(sampler):
             else:
                 # Multiple shapes
                 ndim = get_symbolic_shape_ndim(shapes[0])
-        elif isinstance(shapes[0], int):
+        elif isinstance(shapes[0], (int, np.int8, np.int16, np.int32, np.int64)):
             # Single shape
             return sampler(shapes, *args, **kwargs)
         elif isinstance(shapes[0], (list, tuple, np.ndarray)):

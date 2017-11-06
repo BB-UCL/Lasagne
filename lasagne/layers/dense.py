@@ -81,12 +81,11 @@ class DenseLayer(Layer):
     (None, 10, 20, 50)
     """
     def __init__(self, incoming, num_units, W=init.GlorotUniform(),
-                 b=init.Constant(0.), nonlinearity=nonlinearities.rectify,
+                 b=init.Constant(0.), nonlinearity=None,
                  num_leading_axes=1, curvature_scale=1,
                  fuse_bias=None, invariant_axes=(2, 3), **kwargs):
         super(DenseLayer, self).__init__(incoming, **kwargs)
-        self.nonlinearity = (nonlinearities.identity if nonlinearity is None
-                             else nonlinearity)
+        self.nonlinearity = nonlinearities.get_nonlinearity(nonlinearity)
 
         self.num_units = num_units
         self.fuse_bias = get_fuse_bias() if fuse_bias is None else fuse_bias

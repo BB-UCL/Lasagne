@@ -349,3 +349,36 @@ def linear(x):
     return x
 
 identity = linear
+
+DEFAULT_NONLINEARITY = tanh
+
+
+def set_default_nonlinearity(name):
+    global DEFAULT_NONLINEARITY
+    if isinstance(name, str):
+        if name == "identity" or name == "linear":
+            DEFAULT_NONLINEARITY = identity
+        elif name == "sigmoid":
+            DEFAULT_NONLINEARITY = sigmoid
+        elif name == "tanh":
+            DEFAULT_NONLINEARITY = tanh
+        elif name == "relu":
+            DEFAULT_NONLINEARITY = rectify
+        elif name == "lrelu":
+            DEFAULT_NONLINEARITY = leaky_rectify
+        elif name == "elu":
+            DEFAULT_NONLINEARITY = elu
+        elif name == "selu":
+            DEFAULT_NONLINEARITY = selu
+        elif name == "softplus":
+            DEFAULT_NONLINEARITY = softplus
+    else:
+        DEFAULT_NONLINEARITY = name
+
+
+def get_nonlinearity(nonlinearity=None):
+    global DEFAULT_NONLINEARITY
+    if nonlinearity is None:
+        return DEFAULT_NONLINEARITY
+    else:
+        return nonlinearity

@@ -731,8 +731,13 @@ class Conv2DLayer(BaseConvLayer):
             # Propagate curvature trough the nonlinearity and calculate the activation GN
             if self.nonlinearity != nonlinearities.identity:
                 curvature = T.Lop(outputs[0], activation, curvature)
-            g_factor = curvature.dimshuffle(0, 2, 3, 1).reshape((-1, curvature.shape[1]))
-            make_matrix(self, g_dim, q_dim, g_factor, x, self.get_params(), n_b=n)
+            if optimizer.variant == "skfgn-power":
+                x = T.reshape(x, (activation.shape[0], -1, x.shape[1]))
+                g_factor = curvature.dimshuffle(0, 2, 3, 1).reshape((curvature.shape[0], -1, curvature.shape[1]))
+                make_matrix(self, g_dim, q_dim, g_factor, x, self.get_params(), n_b=n)
+            else:
+                g_factor = curvature.dimshuffle(0, 2, 3, 1).reshape((-1, curvature.shape[1]))
+                make_matrix(self, g_dim, q_dim, g_factor, x, self.get_params(), n_b=n)
             return T.Lop(activation, inputs[0], curvature),
 
 # TODO: add Conv3DLayer

@@ -107,10 +107,12 @@ class GaussianSampler(Layer):
     def __init__(self, incoming,
                  num_samples=1,
                  output_epsilon=False,
+                 log_std=False,
                  **kwargs):
         super(GaussianSampler, self).__init__(incoming, **kwargs)
         self.num_samples = num_samples
         self.output_epsilon = output_epsilon
+        self.log_std = log_std
 
     def get_output_shapes_for(self, input_shapes):
         shape = input_shapes[0]
@@ -123,6 +125,8 @@ class GaussianSampler(Layer):
 
     def get_outputs_for(self, inputs, deterministic=False, **kwargs):
         mu, sigma = utils.split_half(inputs[0])
+        if self.log_std:
+            sigma = T.exp(sigma)
         n, d = mu.shape
         if deterministic:
             return mu,
@@ -434,7 +438,8 @@ class GaussianLikelihood(SKFGNLossLayer):
     """
     def __init__(self, x, p=None, x_repetas=1, p_repeats=1,
                  zero_mean=False, unit_variance=False,
-                 path_derivative=False, *args, **kwargs):
+                 path_derivative=False, log_std=False,
+                 *args, **kwargs):
         if p is None:
             incoming = (x, )
             repeats = (x_repetas, )
@@ -449,6 +454,7 @@ class GaussianLikelihood(SKFGNLossLayer):
         self.zero_mean = zero_mean
         self.unit_variance = unit_variance
         self.path_derivative = path_derivative
+        self.log_std = log_std and not unit_variance
 
     def get_outputs_for(self, inputs, **kwargs):
         x = utils.expand_variable(inputs[0], self.repeats[0])
@@ -476,11 +482,17 @@ class GaussianLikelihood(SKFGNLossLayer):
                 else:
                     mu = utils.expand_variable(T.flatten(mu, ndim=2), self.repeats[1])
                     sigma = utils.expand_variable(T.flatten(sigma, ndim=2), self.repeats[1])
+            if self.log_std:
+                sigma = T.exp(sigma)
+                log_sigma = sigma
+            else:
+                log_sigma = T.log(sigma)
             if self.path_derivative:
                 mu = disconnected_grad(mu)
                 sigma = disconnected_grad(sigma)
+                log_sigma = disconnected_grad(log_sigma)
             log_p_x = - 0.5 * T.log(2 * np.pi)
-            log_p_x += - T.log(sigma) - 0.5 * T.sqr((x - mu) / sigma)
+            log_p_x += - log_sigma - 0.5 * T.sqr((x - mu) / sigma)
         else:
             assert len(inputs) == 1
             log_p_x = - 0.5 * T.log(2 * np.pi) - 0.5 * T.sqr(x)

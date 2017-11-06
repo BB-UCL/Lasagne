@@ -3,6 +3,7 @@ import theano
 import theano.tensor as T
 from theano.ifelse import ifelse
 from theano.gradient import zero_grad
+from theano.tensor.slinalg import solve_symmetric
 from collections import OrderedDict
 import warnings
 
@@ -14,7 +15,7 @@ from .layers import InputLayer
 from .reporting import add_to_report
 
 
-VARIANTS = ("skfgn-rp", "skfgn-fisher", "kfac*", "kfra")
+VARIANTS = ("skfgn-rp", "skfgn-fisher", "skfgn-power", "skfgn-cg", "kfac*", "kfra")
 FUSE_BIAS = False
 
 
@@ -39,7 +40,7 @@ class Optimizer(object):
                  mirror_avg=0.0,
                  alpha_avg=0.0,
                  alpha_period=10,
-                 avg_init_period=100,
+                 avg_init_period=10,
                  clipping=None,
                  learning_rate=1.0,
                  update_function=upd.sgd,
@@ -267,7 +268,7 @@ class Optimizer(object):
         grads_map = OrderedDict((p, g) for p, g in zip(params, grads))
 
         # Calculate all of the Kronecker-Factored matrices
-        kf_matrices = self.curvature_propagation(loss_layer, T.constant(1),
+        kf_matrices = self.curvature_propagation(loss_layer, T.constant(1.0),
                                                  inputs_map, outputs_map,
                                                  treat_as_input)
 
@@ -298,6 +299,8 @@ class Optimizer(object):
             if self.debug:
                 print("Rescaling by the Gauss-Newton matrix.")
             r, alpha = self.gn_rescale(gauss_newton_product, grads, initial_steps)
+            alpha = T.minimum(alpha, 1.0)
+            # alpha = T.constant(0.02)
             # alpha = T.abs_(alpha)
             # Alpha averaging only on certain iterations
             if self.alpha_avg is not None:
@@ -394,7 +397,9 @@ class Optimizer(object):
         steps_map = OrderedDict()
         for mat in kf_matrices:
             # Add the updates for the Kronecker-Factored matrices
-            extra_updates.update(mat.get_updates())
+            # !!!
+            # extra_updates.update(mat.get_updates())
+            # !!!
             grads = []
             if self.grad_avg is not None:
                 for p in mat.params:
@@ -415,6 +420,9 @@ class Optimizer(object):
             else:
                 steps = mat.layer.params_from_fused(joint_step, len(mat.params))
 
+            # !!!
+            extra_updates.update(mat.get_updates())
+            # !!!
             # Exchange the steps in the steps map
             for p, step in zip(mat.params, steps):
                 steps_map[p] = step
@@ -437,7 +445,29 @@ class Optimizer(object):
         kf_matrices = list()
 
         # Helper function to create Kronecker-Factored matrices
-        if self.variant == "kfra":
+        if self.variant == "skfgn-power":
+            def make_matrix(owning_layer, a_dim, b_dim, a, b, params, name=None,
+                            n_a=None, n_b=None):
+                name = name + "_" if name else ""
+                kf_mat = KroneckerFactoredPowerMatrix(b_dim, a_dim, b, a,
+                                                      layer=owning_layer,
+                                                      params=params,
+                                                      k=self.tikhonov_damping,
+                                                      name=name + "kf_power",
+                                                      update_fn=self.curvature_avg)
+                kf_matrices.append(kf_mat)
+        elif self.variant == "skfgn-cg":
+            def make_matrix(owning_layer, a_dim, b_dim, a, b, params, name=None,
+                            n_a=None, n_b=None):
+                name = name + "_" if name else ""
+                kf_mat = KroneckerCgMatrix(b_dim, a_dim, b, a,
+                                           layer=owning_layer,
+                                           params=params,
+                                           k=self.tikhonov_damping,
+                                           name=name + "kf_power",
+                                           update_fn=self.curvature_avg)
+                kf_matrices.append(kf_mat)
+        elif self.variant == "kfra":
             def make_matrix(owning_layer, a_dim, b_dim, a, b, params, name=None):
                 name = name + "_" if name else ""
                 a_factor = FullMatrix(a_dim, a,
@@ -861,9 +891,9 @@ class PositiveSemiDefiniteMatrix(object):
             return v_org / mat[0, 0]
         v = T.reshape(v_org, (-1, 1)) if v_org.ndim < 2 else v_org
         if right_multiply:
-            solved = utils.linear_solve(mat, v, "symmetric")
+            solved = solve_symmetric(mat, v)
         else:
-            solved = utils.linear_solve(mat, v.T, "symmetric").T
+            solved = solve_symmetric(mat, v.T).T
         return T.reshape(solved, v_org.shape) if v_org.ndim < 2 else solved
 
     def cholesky_product(self, v, use="updates", scale=None, k_override=None,
@@ -1035,3 +1065,356 @@ class KroneckerFactoredMatrix(object):
             v2 = a.cholesky_product(v1, use, a_scale, k_override,
                                     transpose=False, right_multiply=False)
         return v2
+
+
+class KroneckerFactoredPowerMatrix(object):
+    """
+    A Kronecker factored matrix A kron B
+
+    For linear solve it used the identity:
+    (A kron B)^-1 vec(V) = vec(B^-1 V A^-1)
+    """
+    def __init__(self, a_dim, b_dim, a, b,
+                 iters=5,
+                 layer=None,
+                 params=None,
+                 k=1e-3,
+                 name=None,
+                 norm_fn=utils.mean_trace_norm,
+                 update_fn=None):
+        self.a_dim = a_dim
+        self.b_dim = b_dim
+        self.a = a
+        self.b = b
+        self.k = k
+        self.iters = iters
+        self.layer = layer
+        self.params = params
+        self.name = name
+        self.update_fn = update_fn
+        self.norm_fn = norm_fn
+        if update_fn is not None:
+            self.make_persistent()
+            self.updates = tuple(self.update_fn(pre, raw) for pre, raw in zip(self.persistent, self.get_raw()))
+        else:
+            self.persistent = None
+            self.updates = None
+
+    def make_persistent(self):
+        value_a = np.eye(self.a_dim) * np.sqrt(utils.floatX(self.k))
+        value_b = np.eye(self.b_dim) * np.sqrt(utils.floatX(self.k))
+        self.persistent = list()
+        if self.layer is not None:
+            self.persistent.append(self.layer.add_param(
+                utils.floatX(value_a), (self.a_dim, self.a_dim),
+                name=self.name + "_U",
+                broadcast_unit_dims=False,
+                trainable=False,
+                regularizable=False,
+                psd=True)
+            )
+            self.persistent.append(self.layer.add_param(
+                utils.floatX(value_b), (self.b_dim, self.b_dim),
+                name=self.name + "_V",
+                broadcast_unit_dims=False,
+                trainable=False,
+                regularizable=False,
+                psd=True)
+            )
+        else:
+            self.persistent.append(theano.shared(utils.floatX(value_a),
+                                                 name=self.name + "_U"))
+            self.persistent.append(theano.shared(utils.floatX(value_b),
+                                                 name=self.name + "_V"))
+
+    def get_raw(self):
+        return power_iteration(self.a, self.b, T.constant(0), self.persistent[1], self.iters)
+
+    def get(self, use="updates"):
+        if use == "persistent":
+            return self.persistent
+        elif use == "updates":
+            if self.updates is not None:
+                return self.updates
+            else:
+                return self.get_raw()
+        elif use == "raw":
+            return self.get_raw()
+        else:
+            raise ValueError("Unrecognized use=" + use)
+
+    def get_updates(self):
+        if self.updates is None:
+            return ()
+        else:
+            return tuple((pre, upd) for pre, upd in zip(self.persistent, self.updates))
+
+    def linear_solve(self, w_org, use="updates", scale=None, k_override=None, right_multiply=True):
+        u, v = self.get(use=use)
+        if self.a_dim == 1 and self.b_dim == 0:
+            raise NotImplementedError
+        elif self.a_dim == 1:
+            raise NotImplementedError
+        elif self.b_dim == 1:
+            raise NotImplementedError
+        else:
+            norm_u = self.norm_fn(u)
+            norm_v = self.norm_fn(v)
+            omega = T.sqrt(norm_u / norm_v)
+            # relative_norm = T.sqrt(norm_a * norm_b)
+            # name = self.layer.name + "_" if self.layer else ""
+            # name += self.name + "_omega"
+            # add_to_report(name, omega)
+            u = u + T.eye(u.shape[0]) * T.sqrt(self.k)
+            v = v + T.eye(v.shape[0]) * T.sqrt(self.k)
+            w = T.reshape(w_org, (-1, 1)) if w_org.ndim < 2 else w_org
+            w = solve_symmetric(u, w)
+            w = solve_symmetric(v, w.T).T
+            return T.reshape(w, w_org.shape) if w.ndim < 2 else w
+
+
+def power_iteration(a, g, k, v, iters):
+    assert a.ndim == g.ndim
+    if a.ndim == 2:
+        return power_iteration_2d(a, g, k, v, iters)
+    else:
+        return power_iteration_3d(a, g, k, v, iters)
+
+
+def power_iteration_2d(a, g, k, v, iters):
+    """
+    Assuming that:
+        H =  k * I + sum_i Kron(a_i a_i^T, g_i g_i^T) / N
+    The function performs power iteration to find matrices `U` and `V` and scalar `s`
+    minimising:
+        ||H - s * kron(U, V)||_F^2
+    :param a:
+        Activations tensor of size N x D1
+    :param g:
+        Pre-activations gradient tensor of size N x D2
+    :param k:
+        Diagonal regualrizer (scalar)
+    :param v:
+        Initial guess for the right eigenvector D2 x D2
+    :param iters:
+        Number of power iterations
+    :return:
+    """
+    assert a.ndim == 2
+    n = utils.th_fx(a.shape[0])
+    for i in range(iters):
+        # Hit matrix on the right with v
+        # N x 1
+        d1 = T.sum(T.dot(g, v) * g, axis=1)
+        # N x D1
+        d2 = a * T.sqrt(d1).dimshuffle(0, 'x')
+        # D1 x D1
+        u = T.dot(d2.T, d2) / n + k * T.sum(T.diag(v)) * T.eye(a.shape[1])
+        u_norm = T.sqrt(T.sum(u**2))
+        u = u / u_norm
+        # Hit matrix on the left with u
+        # N x 1
+        d1 = T.sum(T.dot(a, u) * a, axis=1)
+        # N x D2
+        d2 = g * T.sqrt(d1).dimshuffle(0, 'x')
+        # D2 x D2
+        v = T.dot(d2.T, d2) / n + k * T.sum(T.diag(u)) * T.eye(g.shape[1])
+        v_norm = T.sqrt(T.sum(v ** 2))
+        v = v / v_norm
+        s = v_norm
+    # s = utils.theano_print_values(s, "s")
+    u = u * T.sqrt(s)
+    v = v * T.sqrt(s)
+    return (u + u.T) / 2.0, (v + v.T) / 2.0
+
+
+def power_iteration_3d(a, g, k, v, iters):
+    """
+    Assuming that:
+        H =  k * I + sum_i Kron(a_i a_i^T, g_i g_i^T) / N
+    The function performs power iteration to find matrices `U` and `V` and scalar `s`
+    minimising:
+        ||H - s * kron(U, V)||_F^2
+    :param a:
+        Activations tensor of size N x T x D1
+    :param g:
+        Pre-activations gradient tensor of size N x T x D2
+    :param k:
+        Diagonal regualrizer (scalar)
+    :param v:
+        Initial guess for the right eigenvector D2 x D2
+    :param iters:
+        Number of power iterations
+    :return:
+    """
+    assert a.ndim == 3 and g.ndim == 3
+    a_flat = T.reshape(a, (-1, a.shape[-1]))
+    g_flat = T.reshape(g, (-1, g.shape[-1]))
+    # N x D1 x D2
+    ag = T.batched_dot(a.dimshuffle(0, 2, 1), g)
+    # N x D2 x D1
+    ga = ag.dimshuffle(0, 2, 1)
+    for i in range(iters):
+        # Hit matrix on the right with v
+        # N x T x D2
+        gv = T.dot(g_flat, v).reshape(g.shape)
+        # N x D1 x T
+        ra = T.batched_dot(ag, gv.dimshuffle(0, 2, 1))
+        # N x D1 x D1
+        d2 = T.batched_dot(ra, a)
+        # D1 x D1
+        u = T.mean(d2, axis=0)
+        u_norm = T.sqrt(T.sum(u**2))
+        u = u / u_norm
+        # Hit matrix on the left with u
+        # N x T x D2
+        au = T.dot(a_flat, u).reshape(a.shape)
+        # N x D2 x T
+        rg = T.batched_dot(ga, au.dimshuffle(0, 2, 1))
+        # N x D2 x D2
+        d2 = T.batched_dot(rg, g)
+        # D2 x D2
+        v = T.mean(d2, axis=0)
+        v_norm = T.sqrt(T.sum(v ** 2))
+        s = v_norm
+    u = u * T.sqrt(s)
+    v = v * T.sqrt(s)
+    return (u + u.T) / 2.0, (v + v.T) / 2.0
+
+
+class KroneckerCgMatrix(object):
+    """
+    A Kronecker factored matrix A kron B
+
+    For linear solve it used the identity:
+    (A kron B)^-1 vec(V) = vec(B^-1 V A^-1)
+    """
+    def __init__(self, a_dim, b_dim, a, b,
+                 iters=5,
+                 bs=1000,
+                 gamma=0.9,
+                 layer=None,
+                 params=None,
+                 k=1e-3,
+                 name=None,
+                 norm_fn=utils.mean_trace_norm,
+                 update_fn=None):
+        self.a_dim = a_dim
+        self.b_dim = b_dim
+        self.a = a
+        self.b = b
+        self.k = k
+        self.iters = iters
+        self.bs = bs
+        self.gamma = gamma
+        self.layer = layer
+        self.params = params
+        self.name = name
+        self.update_fn = update_fn
+        self.norm_fn = norm_fn
+        if update_fn is not None:
+            self.make_persistent()
+            self.updates = None
+        else:
+            self.persistent = None
+            self.updates = None
+
+    def make_persistent(self):
+        self.persistent = list()
+        # value_v = np.zeros((self.a_dim, self.b_dim))
+        value_a = np.zeros((self.bs, self.a_dim))
+        value_b = np.zeros((self.bs, self.b_dim))
+        self.persistent = list()
+        if self.layer is not None:
+            # self.persistent.append(self.layer.add_param(
+            #     utils.floatX(value_v), (self.a_dim, self.b_dim),
+            #     name=self.name + "_v0",
+            #     broadcast_unit_dims=False,
+            #     trainable=False,
+            #     regularizable=False,
+            #     psd=True)
+            # )
+            self.persistent.append(self.layer.add_param(
+                np.asarray(0).astype("int64"), (),
+                name=self.name + "_t",
+                broadcast_unit_dims=False,
+                trainable=False,
+                regularizable=False,
+                psd=True)
+            )
+            self.persistent.append(self.layer.add_param(
+                utils.floatX(value_a), (self.bs, self.a_dim),
+                name=self.name + "_a_buffer",
+                broadcast_unit_dims=False,
+                trainable=False,
+                regularizable=False,
+                psd=True)
+            )
+            self.persistent.append(self.layer.add_param(
+                utils.floatX(value_b), (self.bs, self.b_dim),
+                name=self.name + "_b_buffer",
+                broadcast_unit_dims=False,
+                trainable=False,
+                regularizable=False,
+                psd=True)
+            )
+
+    def get_raw(self):
+        return self.a, self.b
+
+    def get(self, use="updates"):
+        if use == "persistent":
+            return self.persistent
+        elif use == "updates":
+            if self.updates is not None:
+                return self.updates
+            else:
+                return self.get_raw()
+        elif use == "raw":
+            return self.get_raw()
+        else:
+            raise ValueError("Unrecognized use=" + use)
+
+    def get_updates(self):
+        if self.updates is None:
+            return ()
+        else:
+            return self.updates
+
+    def linear_solve(self, v, use="updates", scale=None, k_override=None, right_multiply=True):
+        k = self.k if k_override is None else k_override
+        t_old, a_old, b_old = self.persistent
+        t = T.switch(T.gt(t_old + self.a.shape[0], self.bs), self.a.shape[0], t_old + self.a.shape[0])
+        td = t - self.a.shape[0]
+        a = T.set_subtensor(a_old[td:t], self.a)
+        b = T.set_subtensor(b_old[td:t], self.b)
+        s = utils.th_fx(T.int_div(a_old.shape[0], self.a.shape[0]))
+        n = utils.th_fx(self.a.shape[0])
+        factor = (1.0 - self.gamma) / (1.0 - self.gamma ** s)
+        self.updates = dict()
+        self.updates[t_old] = t
+        self.updates[a_old] = a * T.sqrt(T.sqrt(self.gamma))
+        self.updates[b_old] = b * T.sqrt(T.sqrt(self.gamma))
+
+        def product_for_pcg(x):
+            x = x[0]
+            if self.a_dim > self.b_dim:
+                avb = T.sum(T.dot(a, x) * b, axis=1)
+            else:
+                avb = T.sum(T.dot(b, x.T) * a, axis=1)
+            a_tilde = a * avb.dimshuffle(0, 'x')
+            Ax = T.dot(a_tilde.T, b) * factor / n + k * x
+            return [Ax]
+
+        from .pcg import pcg_init, pcg_step, pcg_unpack
+        packed = pcg_init([v], [v], product_for_pcg, lambda x: x)
+        for i in range(self.iters):
+            packed, _ = pcg_step(packed, product_for_pcg, lambda x: x)
+        v_new, _, _, _ = pcg_unpack(packed)
+        v_new = v_new[0]
+        return v_new
+
+
+
+
+
