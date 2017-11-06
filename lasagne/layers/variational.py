@@ -483,8 +483,8 @@ class GaussianLikelihood(SKFGNLossLayer):
                     mu = utils.expand_variable(T.flatten(mu, ndim=2), self.repeats[1])
                     sigma = utils.expand_variable(T.flatten(sigma, ndim=2), self.repeats[1])
             if self.log_std:
-                sigma = T.exp(sigma)
                 log_sigma = sigma
+                sigma = T.exp(sigma)
             else:
                 log_sigma = T.log(sigma)
             if self.path_derivative:
