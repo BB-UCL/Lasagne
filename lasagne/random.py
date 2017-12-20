@@ -199,9 +199,9 @@ def normal(shape, mean=0, std=1, dtype=None, random=None):
     random = random or RandomStreams(get_rng().randint(1, 2147462579))
     samples = random.normal(shape, dtype=dtype)
     samples = disconnected_grad(samples)
-    if std != 1:
+    if not isinstance(std, (int, float)) or std != 1.0:
         samples *= std
-    if mean != 0:
+    if not isinstance(mean, (int, float)) or mean != 0.0:
         samples += mean
     return samples
 

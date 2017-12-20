@@ -439,7 +439,7 @@ class GaussianLikelihood(SKFGNLossLayer):
     def __init__(self, x, p=None, x_repetas=1, p_repeats=1,
                  zero_mean=False, unit_variance=False,
                  path_derivative=False, log_std=False,
-                 *args, **kwargs):
+                 eps=1e-3, *args, **kwargs):
         if p is None:
             incoming = (x, )
             repeats = (x_repetas, )
@@ -455,6 +455,7 @@ class GaussianLikelihood(SKFGNLossLayer):
         self.unit_variance = unit_variance
         self.path_derivative = path_derivative
         self.log_std = log_std and not unit_variance
+        self.eps = eps
 
     def get_outputs_for(self, inputs, **kwargs):
         x = utils.expand_variable(inputs[0], self.repeats[0])
@@ -484,9 +485,9 @@ class GaussianLikelihood(SKFGNLossLayer):
                     sigma = utils.expand_variable(T.flatten(sigma, ndim=2), self.repeats[1])
             if self.log_std:
                 log_sigma = sigma
-                sigma = T.exp(sigma)
+                sigma = T.exp(sigma) + self.eps
             else:
-                log_sigma = T.log(sigma)
+                log_sigma = T.log(sigma + self.eps)
             if self.path_derivative:
                 mu = disconnected_grad(mu)
                 sigma = disconnected_grad(sigma)
