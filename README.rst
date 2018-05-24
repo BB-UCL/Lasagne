@@ -1,3 +1,25 @@
+This branch contains implementations for various techniques based on the Kronecker factored approximations
+to the Hessian of neural networks [1,2,3,4].
+
+Most layers define a `curvature_propagation` method, which passes back curvature information needed for
+calculating the two Kronecker factors for every layer. Note that you need to use the loss layers defined
+in `layers.objectives` in order to use these. Optimization related code is in `skfgn.py`, `laplace.py`
+implements a few utility methods and classes for numerically calculating the curvature factors for use
+in the Kronecker factored Laplace approximation.
+
+
+[1] Aleksandar Botev, Hippolyt Ritter, and David Barber. Practical Gauss-Newton Optimisation for
+Deep Learning. In ICML, 2017.
+
+[2] James Martens and Roger Grosse. Optimizing Neural Networks with Kronecker-factored Approximate
+Curvature. In ICML, 2015.
+
+[3] Roger Grosse and James Martens. A Kronecker-factored Approximate Fisher Matrix for Convolution
+Layers. In ICML, 2016.
+
+[4] Hippolyt Ritter, Aleksandar Botev, and David Barber. A Scalable Laplace Approximation for
+Neural Networks. In ICLR, 2018.
+
 .. image:: https://readthedocs.org/projects/lasagne/badge/
     :target: http://lasagne.readthedocs.org/en/latest/
 
