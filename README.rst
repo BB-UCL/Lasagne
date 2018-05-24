@@ -1,3 +1,23 @@
+This is a fork of `Lasagne <http://github.com/Lasagne/Lasagne`_.
+The main branch contains some basic changes to the library (e.g. allowing
+multiple inputs and outputs for a layer), while our implementations
+of the Kronecker factored approximations to the Hessian of neural networks [1,2,3,4],
+which you are probably here for, are in the `kf` branch.
+
+[1] Aleksandar Botev, Hippolyt Ritter, and David Barber. Practical Gauss-Newton Optimisation for
+Deep Learning. In ICML, 2017.
+
+[2] James Martens and Roger Grosse. Optimizing Neural Networks with Kronecker-factored Approximate
+Curvature. In ICML, 2015.
+
+[3] Roger Grosse and James Martens. A Kronecker-factored Approximate Fisher Matrix for Convolution
+Layers. In ICML, 2016.
+
+[4] Hippolyt Ritter, Aleksandar Botev, and David Barber. A Scalable Laplace Approximation for
+Neural Networks. In ICLR, 2018.
+
+
+
 .. image:: https://readthedocs.org/projects/lasagne/badge/
     :target: http://lasagne.readthedocs.org/en/latest/
 
