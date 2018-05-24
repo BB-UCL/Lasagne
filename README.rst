@@ -1,4 +1,4 @@
-This is a fork of `Lasagne <http://github.com/Lasagne/Lasagne`_.
+This is a fork of `Lasagne <http://github.com/Lasagne/Lasagne>`_.
 The main branch contains some basic changes to the library (e.g. allowing
 multiple inputs and outputs for a layer), while our implementations
 of the Kronecker factored approximations to the Hessian of neural networks [1,2,3,4],
